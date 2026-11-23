@@ -22,6 +22,8 @@ Palm covers what you can't do alone: you can't see your own design render, you d
      `node "${CLAUDE_PLUGIN_ROOT}/scripts/store-art.mjs" render feature.html --size 1024x500 --out upload/feature.png` · `… check google-play upload --out look/play` (or chrome-web-store, steam)
    - Website icons (favicon, touch icon, manifest and maskable icons): render each from SVG, pack favicon.ico, then check the site and Read the sheet (tabs light and dark, home screens, masks):
      `node "${CLAUDE_PLUGIN_ROOT}/scripts/web-icons.mjs" render icon.svg --size 180 --out apple-touch-icon.png` · `… ico 16.png 32.png 48.png --out favicon.ico` · `… check . --out look/icons`
+   - Print files (business cards, flyers, posters): design each side as HTML at trim + bleed, render a print PDF with the exact page size and trim box, then Read the sheet (each page as cut with the blade 1 mm off, real size, the photo as it prints):
+     `node "${CLAUDE_PLUGIN_ROOT}/scripts/print-check.mjs" render cards.html --trim 85x55mm --bleed 3mm --out print/business-cards.pdf` · `… check print/ --trim a5`
    - Check a design without rendering: `node "${CLAUDE_PLUGIN_ROOT}/scripts/design-check.mjs" < design.json`
    - App Store keyword field: `echo '{"name":"…","subtitle":"…","keywords":"…"}' | node "${CLAUDE_PLUGIN_ROOT}/scripts/aso-keywords.mjs"`
 

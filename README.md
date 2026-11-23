@@ -44,6 +44,7 @@ Every part runs the same test: the same agent and request, with and without Palm
 - `a11y-check`: WCAG 2.2 AA by using the page: tabs through it and photographs every focus state, contrast against the real pixels behind text, 320px reflow, motion.
 - `store-art`: Google Play, Chrome Web Store, Steam, Apple Podcasts, Etsy and Shopify graphics checked against each store's current rules (sizes, alpha, banned words, Steam's 2024 capsule sizes) and drawn where the store shows them; renders HTML at exact sizes.
 - `web-icons`: a site's favicon, Apple touch icon and manifest/maskable icons checked (tags, sizes, transparency, the maskable safe zone, contrast on light and dark tabs) and drawn in browser tabs, on iPhone and Android home screens and in the install prompt; renders SVG to PNG and packs favicon.ico.
+- `print-check`: print-ready PDFs for business cards, flyers and posters (exact trim + bleed with the trim box set) and any PDF checked: bleed that really runs to the edge, text near the cut, photo ppi at print size, smallest text and line, embedded fonts; drawn as cut with the blade 1 mm off and at real size. Pages are drawn with Ghostscript, pdftoppm, mutool or PyMuPDF, whichever is installed.
 - `design-check`, `aso-keywords`, and dated, sourced data: platform image sizes and limits (Instagram 3:4, 5 hashtags, YouTube 3840×2160, LinkedIn's 2026 cover…), App Store specs.
 
 **Palm Pro ($15/month or $150/year, 7-day free trial), fetched with your key:**
