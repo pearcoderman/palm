@@ -23,6 +23,7 @@ Every part runs the same test: the same agent and request, with and without Palm
 | Steam store and library art | 16 of 18 (measured 3 of 3 vs 2 of 3) | Pro |
 | Google Play icon, feature graphic, screenshots | 15 of 18 | Pro |
 | Podcast cover and episode art (Apple Podcasts) | 17 of 18 | Pro |
+| Small site found on Google (titles, descriptions, canonical, structured data, sitemap) | 18 of 18 | Pro |
 | Slow website made fast | 3 of 3 reached good LCP (0 of 3 without) | Pro |
 | Instagram carousel | 9 of 9 | Free |
 | YouTube thumbnail | 4 of 4 | Free |
