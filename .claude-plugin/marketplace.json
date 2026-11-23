@@ -1,0 +1,15 @@
+{
+  "name": "yuzool",
+  "owner": {
+    "name": "Yuzool",
+    "url": "https://www.yuzool.com/palm/"
+  },
+  "plugins": [
+    {
+      "name": "palm",
+      "source": "./plugins/palm",
+      "description": "Palm: your agent's eyes. Renders and measures designs, pages and emails; accessibility and speed checks on a phone; link previews; current platform sizes and App Store rules. Tested blind."
+    }
+  ],
+  "description": "Yuzool plugins for Claude Code: Palm, your agent's launch team."
+}

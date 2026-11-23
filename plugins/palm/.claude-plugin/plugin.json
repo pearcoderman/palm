@@ -1,0 +1,32 @@
+{
+  "name": "palm",
+  "version": "0.1.0",
+  "description": "Palm by Yuzool gives your agent eyes: it renders designs, web pages and emails at real size and measures them, checks accessibility and site speed on a phone, shows link previews in seven apps, and knows platform sizes and App Store rules newer than its training. Every part tested blind against the agent alone. No AI on Palm's side.",
+  "author": {
+    "name": "Yuzool",
+    "url": "https://www.yuzool.com/palm/"
+  },
+  "homepage": "https://www.yuzool.com/palm/",
+  "keywords": [
+    "design",
+    "social media",
+    "instagram",
+    "youtube thumbnail",
+    "website",
+    "landing page",
+    "accessibility",
+    "wcag",
+    "core web vitals",
+    "page speed",
+    "email",
+    "newsletter",
+    "link preview",
+    "open graph",
+    "app store",
+    "app store screenshots",
+    "app review",
+    "launch",
+    "marketing",
+    "mcp"
+  ]
+}

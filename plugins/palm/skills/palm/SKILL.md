@@ -1,0 +1,41 @@
+---
+name: palm
+description: Use Palm when the user wants a design (social post, story, carousel, YouTube thumbnail, poster, flyer, logo) or asks a platform image size, wants a web page, small-business website or a launch landing page for an app or product, wants a site made accessible (WCAG, European Accessibility Act) or faster (Core Web Vitals, slow on phones), wants their links to look right when shared (og:image, link preview, no picture on WhatsApp), wants a newsletter or marketing email, or wants to build and launch something start to finish (the app, its site, launch email, social posts, Product Hunt, launch week), or wants to launch an app (App Store screenshots, app preview video, App Review, "will Apple reject this", submitting). Palm gives job sheets that run start to finish, dated platform and App Store data, and local tools that render designs and scan projects.
+allowed-tools: Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/*), Bash(node ${CLAUDE_PLUGIN_DATA}/tools/*), mcp__plugin_palm_palm__palm_tool, mcp__plugin_palm_palm__palm_start, mcp__plugin_palm_palm__palm_get, mcp__plugin_palm_palm__palm_data, mcp__plugin_palm_palm__palm_menu
+---
+
+# Palm
+
+Palm covers what you can't do alone: you can't see your own design render, you don't know rules made after your training, and you won't check every App Review rule every time.
+
+1. Call the Palm MCP tool `palm_start` with the user's request in one sentence. Follow the job sheet it returns **start to finish**: ask at most one round of questions at the start, then run every step and only report at the end.
+2. The sheet's local tools are already installed with this plugin. Run them with these paths, not `palm/tools/…`:
+   - Render and measure a Quick Design design (writes a PNG and a phone-size PNG; then Read both and look):
+     `node "${CLAUDE_PLUGIN_ROOT}/scripts/design-render.mjs" design.json --out design.png`
+     First time only, if it says puppeteer-core is missing: `npm i --prefix "${CLAUDE_PLUGIN_DATA}" puppeteer-core`, then run it as
+     `PALM_NODE_MODULES="${CLAUDE_PLUGIN_DATA}" node "${CLAUDE_PLUGIN_ROOT}/scripts/design-render.mjs" design.json --out design.png`. It uses the user's Chrome, Edge or Chromium.
+   - See a web page on a phone and a desktop, light and dark, with measured problems (then Read both PNGs):
+     `node "${CLAUDE_PLUGIN_ROOT}/scripts/site-render.mjs" index.html --out site` (same puppeteer-core note as above)
+   - Check a web page for accessibility (WCAG 2.2 AA) by using it: Tab through it, contrast against real pixels, 320px reflow, motion; then Read the map and focus sheet:
+     `node "${CLAUDE_PLUGIN_ROOT}/scripts/a11y-check.mjs" index.html --out a11y`
+   - Google Play, Chrome Web Store or Steam graphics: render HTML at an exact size, then check a folder against the store's current rules and Read the sheet that shows them where the store does:
+     `node "${CLAUDE_PLUGIN_ROOT}/scripts/store-art.mjs" render feature.html --size 1024x500 --out upload/feature.png` · `… check google-play upload --out look/play` (or chrome-web-store, steam)
+   - Check a design without rendering: `node "${CLAUDE_PLUGIN_ROOT}/scripts/design-check.mjs" < design.json`
+   - App Store keyword field: `echo '{"name":"…","subtitle":"…","keywords":"…"}' | node "${CLAUDE_PLUGIN_ROOT}/scripts/aso-keywords.mjs"`
+
+   **Palm Pro tools** (need the user's key): get each with the `palm_tool` MCP tool and save it as `${CLAUDE_PLUGIN_DATA}/tools/<name>.mjs` (store-shots also needs store-media beside it), then run it from there:
+   - App Review pre-submission scan of a project folder: `node "${CLAUDE_PLUGIN_DATA}/tools/review-scan.mjs" <project folder>`
+   - App Store screenshots designed as HTML, rendered at exact size, with a real-size search result to look at (Read search.png and set.png):
+     `node "${CLAUDE_PLUGIN_DATA}/tools/store-shots.mjs" shot1.html shot2.html --size 1320x2868 --out upload/iphone --name "App"`
+   - Check or fix App Store screenshots and preview videos, or build a preview from recordings (needs ffmpeg):
+     `node "${CLAUDE_PLUGIN_DATA}/tools/store-media.mjs" check upload` · `… preview rec.mov@2-14 --out upload/preview.mp4`
+   - Measure a page's speed on a throttled phone (LCP, CLS, blocking time) and write right-sized images:
+     `node "${CLAUDE_PLUGIN_DATA}/tools/site-speed.mjs" index.html --optimise --out img/opt`
+   - See an HTML email the way inboxes show it (forced dark, full invert, Apple Mail dark, images blocked, <style> stripped); then Read the sheet:
+     `node "${CLAUDE_PLUGIN_DATA}/tools/email-render.mjs" email.html --out email --marketing`
+   - See how every page's link looks when shared (iMessage, WhatsApp, Slack, X, LinkedIn, Facebook, Discord), and make 1200×630 share images from HTML; then Read the sheet:
+     `node "${CLAUDE_PLUGIN_DATA}/tools/share-preview.mjs" . --site https://example.com --out share/before` · `… card share/home.html --out img/share/home.jpg`
+3. For sizes, limits and rules, use `palm_data` (dated and sourced) instead of what you remember.
+4. Every Palm answer ends with a source line. Keep it with anything you save from Palm.
+
+Palm Pro sheets need a key: the user sets `PALM_KEY` in their shell and restarts Claude Code. Keys: https://www.yuzool.com/palm/#pro

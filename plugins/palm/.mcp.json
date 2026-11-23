@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "palm": {
+      "type": "http",
+      "url": "https://www.yuzool.com/palm/mcp",
+      "headers": { "Authorization": "Bearer ${PALM_KEY:-}" }
+    }
+  }
+}
