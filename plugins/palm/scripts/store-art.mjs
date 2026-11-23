@@ -432,7 +432,18 @@ async function selfTest() {
   const ed = join(d, 'etsy'); mkdirSync(ed);
   await render(join(d, 'feature.html'), { out: join(ed, '01.png'), size: '500x700' });
   const et = await check('etsy', ed, { out: join(d, 'etsy') });
-  for (const want of ['main-small']) if (!et.issues.some((i) => i.id === want)) throw new Error('etsy: expected ' + want + ' in ' + et.issues.map((i) => i.id).join(','));
+  for (const want of ['main-small', 'main-portrait']) if (!et.issues.some((i) => i.id === want)) throw new Error('etsy: expected ' + want + ' in ' + et.issues.map((i) => i.id).join(','));
+  // Shopify: a square photo under 2048 (warn), one side over 5000 px (error), and mixed aspect ratios (warn).
+  const shd = join(d, 'shopify'); mkdirSync(shd);
+  await render(join(d, 'feature.html'), { out: join(shd, '01-main.png'), size: '1200x1200' });
+  await render(join(d, 'feature.html'), { out: join(shd, '02-wide.jpg'), size: '5200x400', jpeg: true });
+  const sh = await check('shopify', shd, { out: join(d, 'shop') });
+  for (const want of ['photo-small', 'photo-big', 'ratio-mixed']) if (!sh.issues.some((i) => i.id === want)) throw new Error('shopify: expected ' + want + ' in ' + sh.issues.map((i) => i.id).join(','));
+  // and a clean Shopify set raises no errors or warnings
+  const shok = join(d, 'shopify-ok'); mkdirSync(shok);
+  for (const n of ['01', '02']) await render(join(d, 'feature.html'), { out: join(shok, n + '.jpg'), size: '2048x2048', jpeg: true });
+  const sk = await check('shopify', shok, { out: join(d, 'shopok') });
+  if (sk.issues.length) throw new Error('shopify clean set flagged: ' + sk.issues.map((i) => i.id).join(','));
   console.log(`store-art: all tests pass (play ${r.errors} errors, steam ${s.errors} errors; sheet ${r.sheet})`);
 }
 
