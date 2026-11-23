@@ -20,6 +20,8 @@ Palm covers what you can't do alone: you can't see your own design render, you d
      `node "${CLAUDE_PLUGIN_ROOT}/scripts/a11y-check.mjs" index.html --out a11y`
    - Google Play, Chrome Web Store or Steam graphics: render HTML at an exact size, then check a folder against the store's current rules and Read the sheet that shows them where the store does:
      `node "${CLAUDE_PLUGIN_ROOT}/scripts/store-art.mjs" render feature.html --size 1024x500 --out upload/feature.png` · `… check google-play upload --out look/play` (or chrome-web-store, steam)
+   - Website icons (favicon, touch icon, manifest and maskable icons): render each from SVG, pack favicon.ico, then check the site and Read the sheet (tabs light and dark, home screens, masks):
+     `node "${CLAUDE_PLUGIN_ROOT}/scripts/web-icons.mjs" render icon.svg --size 180 --out apple-touch-icon.png` · `… ico 16.png 32.png 48.png --out favicon.ico` · `… check . --out look/icons`
    - Check a design without rendering: `node "${CLAUDE_PLUGIN_ROOT}/scripts/design-check.mjs" < design.json`
    - App Store keyword field: `echo '{"name":"…","subtitle":"…","keywords":"…"}' | node "${CLAUDE_PLUGIN_ROOT}/scripts/aso-keywords.mjs"`
 

@@ -39,6 +39,7 @@ Every part runs the same test: the same agent and request, with and without Palm
 - `site-render`: a web page on a phone and a desktop, light and dark, measured (sideways scrolling, contrast, tap targets, covered headings).
 - `a11y-check`: WCAG 2.2 AA by using the page: tabs through it and photographs every focus state, contrast against the real pixels behind text, 320px reflow, motion.
 - `store-art`: Google Play, Chrome Web Store, Steam, Apple Podcasts, Etsy and Shopify graphics checked against each store's current rules (sizes, alpha, banned words, Steam's 2024 capsule sizes) and drawn where the store shows them; renders HTML at exact sizes.
+- `web-icons`: a site's favicon, Apple touch icon and manifest/maskable icons checked (tags, sizes, transparency, the maskable safe zone, contrast on light and dark tabs) and drawn in browser tabs, on iPhone and Android home screens and in the install prompt; renders SVG to PNG and packs favicon.ico.
 - `design-check`, `aso-keywords`, and dated, sourced data: platform image sizes and limits (Instagram 3:4, 5 hashtags, YouTube 3840×2160, LinkedIn's 2026 cover…), App Store specs.
 
 **Palm Pro ($15/month or $150/year), fetched with your key:**
