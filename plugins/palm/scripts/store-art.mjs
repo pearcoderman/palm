@@ -6,16 +6,18 @@
 // at list size, the feature graphic at phone width with its cutoff zones, the Chrome tile at half size on the grey
 // page, Steam's small capsule at 120×45 and 184×69 in a search row, the library grid and the hero with its safe area,
 // a podcast cover at 60 px in a list and on a lock screen, and a shop's first photo in the square, portrait and
-// landscape crops a marketplace grid uses.
+// landscape crops a marketplace grid uses; and a social profile kit (avatar, YouTube banner, X header, LinkedIn
+// banners, Facebook cover) on each site's desktop and phone layout with the avatar laid over it.
 // One sheet to LOOK at, plus measured problems. Also renders an HTML design to an image at an exact size.
 // adds: tool, fresh-data. Runs on the user's machine with their Chrome/Edge/Chromium; nothing leaves it.
 //
-//   node store-art.mjs check <google-play|chrome-web-store|steam|apple-podcasts|etsy|shopify> <folder> [--out art]
+//   node store-art.mjs check <google-play|chrome-web-store|steam|apple-podcasts|etsy|shopify|profiles> <folder> [--out art]
 //       → JSON {ok, store, found:[{key, file, w, h}], missing, issues} and <out>-sheet.png. Then LOOK at the sheet.
 //   node store-art.mjs render <design.html> --size 1024x500 --out upload/feature.png [--jpeg] [--alpha]
 //       → renders the HTML at exactly that size. PNGs are flattened (no alpha) unless --alpha (icons, Steam logo).
 //
-// Sizes and rules: Palm data pack app-launch/store-art (checked 2026-11-23, from the stores' own pages).
+// Sizes and rules: Palm data pack app-launch/store-art (checked 2026-11-23, from the stores' own pages); social
+// profiles from design/platform-sizes (YouTube and LinkedIn Pages rechecked on their help pages 2026-11-23).
 
 import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -128,6 +130,56 @@ export const STORES = {
   },
 };
 
+// Social profiles. Official: YouTube Help 10456525 (banner 16:9, min 2048×1152, 2560×1440 for TV, safe area 1235×338
+// at 2048 wide, ≤6 MB; profile picture rendered at 98×98, ≤15 MB), LinkedIn Help a563309 (Page cover 1512×256 min and
+// recommended, logo 400×400, min 268, PNG/JPEG ≤3 MB), X Help (header 1500×500, photo 400×400, photo ≤2 MB), Facebook
+// Help 125379114252045 (cover 851×315, at least 400×150). LinkedIn's member banner 1584×396 / 8 MB is a community
+// figure (LinkedIn's page wasn't found). Where each site lays the avatar over the banner, and how phones crop, is
+// Palm's measurement of the current layouts, not published: the sheet says so.
+STORES.profiles = {
+  name: 'Social profiles',
+  profiles: [
+    { key: 'youtube', label: 'YouTube banner', ratio: 16 / 9, tol: 0.01, rec: [2560, 1440], min: [2048, 1152], maxMB: 6, hint: /you ?tube|yt|channel/i, skip: 'not on YouTube' },
+    { key: 'x', label: 'X header', ratio: 3, tol: 0.01, rec: [1500, 500], min: [1500, 500], minLevel: 'warn', hint: /\bx\b|x[-_]|twitter|header/i, not: /bluesky|bsky/i, skip: 'not on X' },
+    { key: 'linkedin', label: 'LinkedIn profile banner', ratio: 4, tol: 0.01, rec: [1584, 396], min: [1584, 396], minLevel: 'warn', maxMB: 8, maxLevel: 'warn', hint: /linked ?in|li[-_]|profile|personal|member/i, skip: 'no personal LinkedIn' },
+    { key: 'linkedin-page', label: 'LinkedIn Page cover', ratio: 1512 / 256, tol: 0.02, rec: [1512, 256], min: [1512, 256], maxMB: 3, old: [1128, 191], hint: /page|company|cover|linked/i, skip: 'no LinkedIn Page' },
+    { key: 'facebook', label: 'Facebook cover', ratio: 851 / 315, tol: 0.04, rec: [851, 315], min: [400, 150], hint: /face ?book|fb/i, skip: 'not on Facebook' },
+  ],
+  avatar: { min: 400, maxMB: 2, hint: /avatar|profile|pfp|logo|icon|photo|picture|mark/i },
+  words: [], wordsWhy: '',
+};
+
+// Social profiles: one avatar (square) and a banner per site, matched by shape (file names break ties).
+function profileArt(S, imgs, issues, found, used) {
+  const pool = imgs.filter((im) => !/sheet|look|context|preview/i.test(basename(im.file)));
+  const ok = (im) => ['png', 'jpeg'].includes(im.format);
+  const squares = pool.filter((im) => im.w === im.h).sort((a, b) => (S.avatar.hint.test(basename(b.file)) ? 1 : 0) - (S.avatar.hint.test(basename(a.file)) ? 1 : 0));
+  const av = squares[0];
+  if (!av) issues.push(issue('missing-avatar', 'error', 'No profile picture (a square image; 400×400 or larger works everywhere: X shows 400×400, YouTube renders 98×98, LinkedIn wants 400×400 for a Page logo).', 'Render one square avatar, e.g. --size 800x800.'));
+  else {
+    used.add(av.file); found.push({ key: 'avatar', label: 'Profile picture', file: av.rel, w: av.w, h: av.h, format: av.format, alpha: av.alpha, kb: av.kb, abs: av.file });
+    if (av.w < S.avatar.min) issues.push(issue('avatar-small', 'warn', `The profile picture is ${av.w}×${av.h}; X and LinkedIn want 400×400.`, 'Render it at 800×800.'));
+    if (av.kb > S.avatar.maxMB * 1024) issues.push(issue('avatar-mb', 'error', `The profile picture is ${(av.kb / 1024).toFixed(1)} MB; X takes up to ${S.avatar.maxMB} MB.`, 'Save it as JPG, or smaller.'));
+    if (!ok(av)) issues.push(issue('avatar-format', 'error', `The profile picture is ${av.format.toUpperCase()}; use PNG or JPG (LinkedIn takes only those).`, 'Save it as PNG or JPG.'));
+    if (av.alpha) issues.push(issue('avatar-alpha', 'warn', 'The profile picture has transparency. LinkedIn shows it on white and X/YouTube on light or dark, so the edges change from site to site.', 'Give it a solid background.'));
+    for (const im of squares.slice(1)) if (!used.has(im.file)) { used.add(im.file); issues.push(issue('extra', 'warn', `${im.rel}: another square image; only one profile picture is used (name it "avatar" to choose).`, 'Remove it.')); }
+  }
+  for (const p of S.profiles) {
+    let cand = pool.filter((im) => !used.has(im.file) && Math.abs(im.w / im.h - p.ratio) / p.ratio <= p.tol && !(p.not && p.not.test(basename(im.file))));
+    cand.sort((a, b) => (p.hint.test(basename(b.file)) ? 1 : 0) - (p.hint.test(basename(a.file)) ? 1 : 0) || b.w - a.w);
+    const im = cand[0];
+    if (!im) { issues.push(issue('missing-' + p.key, 'warn', `No ${p.label} (${p.rec.join('×')}). Skip this if ${p.skip}.`, `Render it with --size ${p.rec.join('x')}.`)); continue; }
+    used.add(im.file); found.push({ key: p.key, label: p.label, file: im.rel, w: im.w, h: im.h, format: im.format, alpha: im.alpha, kb: im.kb, abs: im.file });
+    for (const x of cand.slice(1)) if (p.hint.test(basename(x.file)) === p.hint.test(basename(im.file)) && x.w === im.w) { used.add(x.file); issues.push(issue('extra', 'warn', `${x.rel}: a second ${p.label}; only one is used.`, 'Remove it.')); }
+    if (p.old && im.w === p.old[0] && im.h === p.old[1]) issues.push(issue('old-size', 'error', `${p.label} ${im.rel} is ${im.w}×${im.h}, LinkedIn's old size. Pages now take ${p.rec.join('×')} (both minimum and recommended, 2026).`, `Render it at ${p.rec.join('×')}.`));
+    else if (im.w < p.min[0] || im.h < p.min[1]) issues.push(issue('size-' + p.key, p.minLevel || 'error', `${p.label} ${im.rel} is ${im.w}×${im.h}; it needs at least ${p.min.join('×')}${p.rec[0] !== p.min[0] ? ` (${p.rec.join('×')} recommended)` : ''}.`, `Render it at ${p.rec.join('×')}.`));
+    else if (p.key === 'youtube' && im.w < p.rec[0]) issues.push(issue('size-youtube', 'warn', `The YouTube banner is ${im.w}×${im.h}; YouTube recommends 2560×1440 so it's sharp on TVs.`, 'Render it at 2560×1440.'));
+    if (p.maxMB && im.kb > p.maxMB * 1024) issues.push(issue('mb-' + p.key, p.maxLevel || 'error', `${p.label} is ${(im.kb / 1024).toFixed(1)} MB; the limit is ${p.maxMB} MB.`, 'Save it as JPG at quality ~85.'));
+    if (!ok(im)) issues.push(issue('format-' + p.key, 'error', `${p.label} ${im.rel} is ${im.format.toUpperCase()}; use JPG or PNG.`, 'Save it as JPG or PNG.'));
+    if (im.alpha) issues.push(issue('alpha-' + p.key, 'warn', `${p.label} ${im.rel} has transparency; sites fill it with their own background colour.`, 'Flatten it (render without --alpha).'));
+  }
+}
+
 function walk(dir, out = []) {
   for (const f of readdirSync(dir, { withFileTypes: true })) {
     if (f.name.startsWith('.') || f.name === 'node_modules') continue;
@@ -216,6 +268,7 @@ export async function check(store, folder, { out = 'art' } = {}) {
 
   if (S.square) squareArt(S, imgs, files, issues, found, used, root);
   if (S.photos) shopPhotos(S, imgs, issues, found, used);
+  if (S.profiles) profileArt(S, imgs, issues, found, used);
   for (const a of S.assets || []) {
     let cand = imgs.filter((im) => !used.has(im.file) && (a.logo ? im.format === 'png' && ((im.w === 1280 && im.h <= 720) || (im.h === 720 && im.w <= 1280)) : im.w === a.w && im.h === a.h));
     if (a.hint && cand.length > 1) cand = cand.filter((im) => a.hint.test(im.rel)).concat(cand.filter((im) => !a.hint.test(im.rel)));
@@ -321,6 +374,27 @@ function drawSheet(store, found) {
     body += `<div class="sec"><h2>Show cover in a list at 60 px and in search at 44 px, light and dark: can you read the name? Would you know it again?</h2><div class="row">${list('#fff', '#111', 60)}${list('#1c1c1e', '#fff', 60)}${list('#fff', '#111', 44)}</div></div>`;
     body += `<div class="sec dark" style="background:linear-gradient(#3a3a5a,#121218)"><h2 style="color:#bbb">Lock screen / Now Playing (about 300 px), and full cover at 600 px</h2><div class="row"><div style="width:340px;padding:20px;border-radius:24px;background:rgba(255,255,255,.12)">${img(cv, 300, 300, 'border-radius:12px')}<div style="margin-top:10px;font-weight:600">Episode title</div><div style="font-size:12px;opacity:.7">Your show</div></div>${img(cv, 600, 600)}</div></div>`;
     if (eps.length) body += `<div class="sec"><h2>Episode art (${eps.length}): no text, no logo; shown on Now Playing and episode pages</h2><div class="row">${eps.slice(0, 6).map((e) => img(e, 240, 240, 'border-radius:8px')).join('')}</div></div>`;
+  } else if (store === 'profiles') {
+    const F = (k) => found.find((x) => x.key === k);
+    const av = F('avatar'), avu = av ? pathToFileURL(av.abs).href : null;
+    // A banner shown in a box of bw×bh, scaled to `scale`× the box width (1 = fits the width), aligned centre or left.
+    const ban = (k, bw, bh, { scale = 1, pos = 'center', label = '' } = {}) => { const f = F(k); if (!f) return `<div class="miss" style="width:${bw}px;height:${bh}px">no ${label || k}</div>`; const sc = Math.max(scale, (bh * f.w / f.h) / bw); return `<div style="width:${bw}px;height:${bh}px;background:#888 url('${pathToFileURL(f.abs).href}') ${pos} / ${Math.round(bw * sc)}px auto no-repeat"></div>`; };
+    const face = (sz, round = true, ring = '#fff') => avu ? `<img src="${avu}" style="width:${sz}px;height:${sz}px;object-fit:cover;display:block;border-radius:${round ? '50%' : Math.round(sz * 0.08) + 'px'};box-shadow:0 0 0 ${Math.max(2, Math.round(sz / 30))}px ${ring}">` : `<div class="miss" style="width:${sz}px;height:${sz}px;border-radius:${round ? '50%' : '6px'}">avatar</div>`;
+    const over = (banner, w, h, sz, left, top, { round = true, ring = '#fff', bg = '#fff', fg = '#111', name = 'Your name', sub = '', zone = '' } = {}) => `<div style="background:${bg};color:${fg};width:${w}px;border-radius:10px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.25)"><div class="box" style="height:${h}px">${banner}${zone}</div><div style="position:relative;height:${Math.max(0, top - h + sz) + 52}px"><div style="position:absolute;left:${left}px;top:${top - h}px">${face(sz, round, ring)}</div><div style="position:absolute;left:${left}px;top:${Math.max(0, top - h + sz) + 8}px;font-weight:700">${name}</div>${sub ? `<div style="position:absolute;left:${left}px;top:${Math.max(0, top - h + sz) + 26}px;font-size:12px;opacity:.65">${sub}</div>` : ''}</div></div>`;
+    // Avatar at the sizes it's actually seen.
+    const avRow = (bg, fg) => `<div style="background:${bg};color:${fg};padding:14px;border-radius:10px;width:300px">${[0, 1, 2].map((i) => `<div style="display:flex;gap:10px;align-items:center;margin:8px 0">${i === 1 ? face(40, true, 'transparent') : `<div style="width:40px;height:40px;border-radius:50%;background:${fg === '#fff' ? '#333' : '#ddd'}"></div>`}<div><div style="font-weight:600;font-size:13px">${i === 1 ? 'You' : 'Someone else'}</div><div style="font-size:12px;opacity:.6">replied · 2h</div></div></div>`).join('')}</div>`;
+    body += `<div class="sec"><h2>Profile picture where it's seen: in replies and comments at 40 px and as small as 24 px, light and dark; YouTube's 98 px; a LinkedIn Page's square logo</h2><div class="row">${avRow('#fff', '#111')}${avRow('#000', '#fff')}<div style="display:flex;gap:14px;align-items:flex-end">${face(24, true, 'transparent')}${face(32, true, 'transparent')}${face(98, true, 'transparent')}${face(98, false, 'transparent')}</div></div></div>`;
+    // YouTube: TV shows the whole 16:9; desktop shows a centre band (~2560×423 of 2560×1440); phones a narrower centre (~1546×423). Safe area 1235×338 at 2048 wide (official).
+    const yt = F('youtube');
+    const safe = (bw, scaleW) => `<div class="zone" style="left:${(bw - scaleW * 1235 / 2048) / 2}px;width:${scaleW * 1235 / 2048}px;top:50%;height:${scaleW * 338 / 2048}px;transform:translateY(-50%)"></div>`;
+    body += `<div class="sec dark" style="background:#0f0f0f"><h2 style="color:#aaa">YouTube banner: on a TV (all of it), on desktop (a centre band) and on a phone (a narrower centre). Dashed box: YouTube's safe area for text and logos (official); the band crops are Palm's measurement</h2><div class="row"><div><div class="box">${ban('youtube', 480, 270, { label: 'YouTube banner' })}${yt ? safe(480, 480) : ''}</div><div class="lab">TV, 16:9</div></div><div><div class="box">${ban('youtube', 820, 136, { label: 'YouTube banner' })}${yt ? safe(820, 820) : ''}</div><div style="display:flex;gap:14px;align-items:center;margin-top:14px">${face(72, true, 'transparent')}<div style="color:#fff"><div style="font-size:20px;font-weight:700">Your channel</div><div style="font-size:12px;color:#aaa">@yourchannel · 1.2K subscribers</div></div></div><div class="lab">desktop</div></div><div style="width:390px"><div class="box" style="overflow:hidden">${ban('youtube', 390, 107, { scale: 2560 / 1546, label: 'YouTube banner' })}${yt ? safe(390, 390 * 2560 / 1546) : ''}</div><div style="display:flex;gap:10px;align-items:center;margin-top:10px">${face(56, true, 'transparent')}<div style="color:#fff;font-weight:700">Your channel</div></div><div class="lab">phone</div></div></div></div>`;
+    // X: 3:1 header, avatar circle over its lower left. Phones can trim the top and bottom (community: ~60 of 500 px each).
+    const xTrim = (bw, bh) => `<div class="zone" style="left:0;width:${bw}px;top:${bh * 0.12}px;height:${bh * 0.76}px"></div>`;
+    body += `<div class="sec"><h2>X header with the profile picture over its lower left: desktop (dark) and phone (light). Dashed lines: phones may trim about 12% top and bottom (community measurement)</h2><div class="row">${over(ban('x', 600, 200, { label: 'X header' }), 600, 200, 134, 16, 133, { bg: '#000', fg: '#e7e9ea', ring: '#000', name: 'Your name', sub: '@yourhandle' })}${over(ban('x', 390, 130, { label: 'X header' }), 390, 130, 80, 16, 100, { ring: '#fff', name: 'Your name', sub: '@yourhandle', zone: F('x') ? xTrim(390, 130) : '' })}</div></div>`;
+    // LinkedIn member: 4:1 banner, round photo over the lower left. Company Page: ~5.9:1 cover, square logo over the lower left.
+    body += `<div class="sec" style="background:#f4f2ee"><h2>LinkedIn: profile banner with the round photo over its lower left, desktop and phone; Page cover with the square logo over it, desktop and phone (overlap positions: Palm's measurement)</h2><div class="row">${over(ban('linkedin', 804, 201, { label: 'LinkedIn banner' }), 804, 201, 152, 24, 125, { name: 'Your Name', sub: 'Founder at Your Studio' })}${over(ban('linkedin', 390, 98, { label: 'LinkedIn banner' }), 390, 98, 88, 16, 54, { name: 'Your Name', sub: 'Founder at Your Studio' })}</div><div class="row" style="margin-top:18px">${over(ban('linkedin-page', 804, 136, { label: 'LinkedIn Page cover' }), 804, 136, 104, 24, 84, { round: false, name: 'Your Studio', sub: 'Design services · 120 followers' })}${over(ban('linkedin-page', 390, 66, { label: 'LinkedIn Page cover' }), 390, 66, 64, 16, 34, { round: false, name: 'Your Studio', sub: '120 followers' })}</div></div>`;
+    // Facebook: cover shown wide on desktop; phones show a taller, narrower centre (Facebook: 820×312 desktop, 640×360 phone).
+    body += `<div class="sec" style="background:#f0f2f5"><h2>Facebook Page cover: desktop (about 820×312) and phone (about 640×360, so the sides are cut), with the profile picture over the lower left</h2><div class="row">${over(ban('facebook', 820, 312, { scale: 820 / 820, label: 'Facebook cover' }), 820, 312, 168, 24, 250, { name: 'Your Page', sub: '1.2K likes' })}${over(ban('facebook', 390, 219, { scale: (219 * 851 / 315) / 390, label: 'Facebook cover' }), 390, 219, 96, 16, 180, { name: 'Your Page', sub: '1.2K likes' })}</div></div>`;
   } else if (store === 'etsy' || store === 'shopify') {
     const main = u('main'), all = found.filter((x) => x.key === 'main' || x.key === 'photo').map((x) => pathToFileURL(x.abs).href);
     const ph = (i) => `<div style="width:100%;height:100%;background:hsl(${i * 47 + 30},18%,${80 - (i % 3) * 6}%)"></div>`;
@@ -444,6 +518,17 @@ async function selfTest() {
   for (const n of ['01', '02']) await render(join(d, 'feature.html'), { out: join(shok, n + '.jpg'), size: '2048x2048', jpeg: true });
   const sk = await check('shopify', shok, { out: join(d, 'shopok') });
   if (sk.issues.length) throw new Error('shopify clean set flagged: ' + sk.issues.map((i) => i.id).join(','));
+  // Social profiles: no avatar, a YouTube banner under 2048 wide, LinkedIn's old Page size; then a clean kit.
+  const pr = join(d, 'profiles'); mkdirSync(pr);
+  await render(join(d, 'feature.html'), { out: join(pr, 'youtube.jpg'), size: '1920x1080', jpeg: true });
+  await render(join(d, 'feature.html'), { out: join(pr, 'linkedin-page.jpg'), size: '1128x191', jpeg: true });
+  const pf = await check('profiles', pr, { out: join(d, 'prof') });
+  for (const want of ['missing-avatar', 'size-youtube', 'old-size', 'missing-x']) if (!pf.issues.some((i) => i.id === want)) throw new Error('profiles: expected ' + want + ' in ' + pf.issues.map((i) => i.id).join(','));
+  const pk = join(d, 'profiles-ok'); mkdirSync(pk);
+  await render(join(d, 'feature.html'), { out: join(pk, 'avatar.png'), size: '800x800' });
+  for (const [n, sz] of [['youtube', '2560x1440'], ['x-header', '1500x500'], ['linkedin', '1584x396'], ['linkedin-page', '1512x256'], ['facebook', '851x315']]) await render(join(d, 'feature.html'), { out: join(pk, n + '.jpg'), size: sz, jpeg: true });
+  const pg = await check('profiles', pk, { out: join(d, 'profok') });
+  if (pg.issues.length || pg.found.length !== 6) throw new Error('profiles clean kit: ' + pg.issues.map((i) => i.id).join(',') + ' found ' + pg.found.map((f) => f.key).join(','));
   console.log(`store-art: all tests pass (play ${r.errors} errors, steam ${s.errors} errors; sheet ${r.sheet})`);
 }
 
@@ -457,5 +542,5 @@ if (typeof process !== 'undefined' && process.argv?.[1] === fileURLToPath(import
   if (argv.includes('--test')) selfTest().then(() => process.exit(0), (e) => { console.error(e); process.exit(1); });
   else if (pos[0] === 'render' && pos[1]) render(pos[1], { out: opt('out', 'out.png'), size: opt('size'), jpeg: argv.includes('--jpeg'), alpha: argv.includes('--alpha'), quality: +opt('quality', 90) }).then(done, fail);
   else if (pos[0] === 'check' && pos[1] && pos[2]) check(pos[1], pos[2], { out: opt('out', 'art') }).then(done, fail);
-  else fail('usage: store-art.mjs check <google-play|chrome-web-store|steam|apple-podcasts|etsy|shopify> <folder> [--out art]\n       store-art.mjs render <design.html> --size 1024x500 --out upload/feature.png [--jpeg] [--alpha]');
+  else fail('usage: store-art.mjs check <google-play|chrome-web-store|steam|apple-podcasts|etsy|shopify|profiles> <folder> [--out art]\n       store-art.mjs render <design.html> --size 1024x500 --out upload/feature.png [--jpeg] [--alpha]');
 }
