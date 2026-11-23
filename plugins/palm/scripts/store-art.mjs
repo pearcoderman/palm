@@ -7,17 +7,21 @@
 // page, Steam's small capsule at 120×45 and 184×69 in a search row, the library grid and the hero with its safe area,
 // a podcast cover at 60 px in a list and on a lock screen, and a shop's first photo in the square, portrait and
 // landscape crops a marketplace grid uses; and a social profile kit (avatar, YouTube banner, X header, LinkedIn
-// banners, Facebook cover) on each site's desktop and phone layout with the avatar laid over it.
+// banners, Facebook cover) on each site's desktop and phone layout with the avatar laid over it; and Meta ads (feed, Stories,
+// Reels) in the Facebook and Instagram apps at phone size with their buttons over them, the copy cut where the apps cut
+// it, and text measured against Meta's 9:16 safe zone from the HTML each creative was made from.
+// (The ads check is kept for reference; its job sheet didn't ship: a blind tie, PALM-AGENTS-PLAN.md.)
 // One sheet to LOOK at, plus measured problems. Also renders an HTML design to an image at an exact size.
 // adds: tool, fresh-data. Runs on the user's machine with their Chrome/Edge/Chromium; nothing leaves it.
 //
-//   node store-art.mjs check <google-play|chrome-web-store|steam|apple-podcasts|etsy|shopify|profiles> <folder> [--out art]
+//   node store-art.mjs check <google-play|chrome-web-store|steam|apple-podcasts|etsy|shopify|profiles|ads> <folder> [--out art]
 //       → JSON {ok, store, found:[{key, file, w, h}], missing, issues} and <out>-sheet.png. Then LOOK at the sheet.
 //   node store-art.mjs render <design.html> --size 1024x500 --out upload/feature.png [--jpeg] [--alpha]
 //       → renders the HTML at exactly that size. PNGs are flattened (no alpha) unless --alpha (icons, Steam logo).
 //
 // Sizes and rules: Palm data pack app-launch/store-art (checked 2026-11-23, from the stores' own pages); social
-// profiles from design/platform-sizes (YouTube and LinkedIn Pages rechecked on their help pages 2026-11-23).
+// profiles from design/platform-sizes (YouTube and LinkedIn Pages rechecked on their help pages 2026-11-23); ads from
+// marketing/ad-specs (Meta Ads Guide, 2026-11-23).
 
 import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -149,6 +153,127 @@ STORES.profiles = {
   words: [], wordsWhy: '',
 };
 
+// Meta ads (Facebook and Instagram feed, Stories, Reels). Official, Meta Ads Guide read 2026-11-23: feed 4:5 at 1440×1800
+// (FB min width 600, 3% tolerance; IG min width 500, 1% tolerance, widest 1.91:1); Stories/Reels 9:16 at 1440×2560 (min
+// width 500, 1% tolerance); JPG or PNG up to 30 MB; text: IG feed primary 125 / headline 40, FB feed primary 50–150 /
+// headline 27, Stories primary 125 / headline 40, Reels primary 44. Safe zone for 9:16: roughly 14% top, 35% bottom and
+// 6% each side free of text, logos and key elements (Business Help 980593475366490). Where the apps cut the copy is
+// drawn with line clamps at phone width: Palm's approximation of the layouts, and the sheet says so.
+STORES.ads = {
+  name: 'Meta ads',
+  ads: {
+    feed: { label: 'Feed (4:5)', ratios: [[4 / 5, 0.01], [1, 0.01], [1.91, 0.01]], rec: [1440, 1800], minW: 600, maxMB: 30 },
+    vertical: { label: 'Stories and Reels (9:16)', ratios: [[9 / 16, 0.01]], rec: [1440, 2560], minW: 500, maxMB: 30, safe: { top: 0.14, bottom: 0.35, side: 0.06 } },
+    text: { primary: 125, reelsPrimary: 44, headline: 40, fbHeadline: 27 },
+  },
+  words: [], wordsWhy: '',
+};
+
+// Reads the ad copy: copy.md / copy.txt / copy.json in the folder ("Primary text: …", "Headline: …", "Description: …";
+// several variants allowed).
+export function readCopy(files) {
+  const f = files.find((x) => /(^|[\/\\])(ad[-_ ]?)?copy\.(md|txt|json)$/i.test(x)) || files.find((x) => /copy|text/i.test(basename(x)) && /\.(md|txt|json)$/i.test(x));
+  if (!f) return null;
+  const raw = readFileSync(f, 'utf8'), out = { file: f, primary: [], headline: [], description: [] };
+  if (/\.json$/i.test(f)) { try { const j = JSON.parse(raw); for (const k of ['primary', 'headline', 'description']) { const v = j[k] ?? j[k + '_text'] ?? j[k + 'Text'] ?? j[k + 's']; if (v) out[k] = [].concat(v).map(String); } return out; } catch { /* fall through */ } }
+  // Two layouts: "Primary text: …" lines, or a "## Primary text" heading (or a bold line) with the text below it,
+  // where paragraphs belong to one text and list items are separate variants.
+  const kindOf = (s) => { const m = String(s).trim().match(/^(primary(?:\s*text)?|headline|description)s?\b/i); return m ? (/primary/i.test(m[1]) ? 'primary' : m[1].toLowerCase()) : null; };
+  const clean = (t) => t.trim().replace(/^["“]|["”]$/g, '');
+  let cur = null, gap = false;
+  for (const line of raw.split(/\r?\n/)) {
+    const m = line.match(/^\s*(?:[-*]\s*)?\**\s*(primary(?:\s*text)?|headline|description)\s*(?:\d+|\(\w+\))?\s*\**\s*[:：]\s*\**\s*(.*)$/i);
+    if (m) { cur = kindOf(m[1]); out[cur].push(clean(m[2])); gap = false; continue; }
+    const h = line.match(/^\s*#{1,6}\s*(.+?)\s*#*\s*$/) || line.match(/^\s*\*\*([^*]+)\*\*\s*$/);
+    if (h) { cur = kindOf(h[1].replace(/[\d().:]+\s*$/, '')); if (cur) out[cur].push(''); gap = false; continue; }
+    if (/^\s*$/.test(line)) { gap = true; continue; }
+    if (!cur) continue;
+    const li = line.match(/^\s*(?:[-*•]|\d+[.)])\s+(.*)$/);
+    const list = out[cur];
+    if (li && list.length && list[list.length - 1] && !/^[✔✓✅]/.test(li[1])) { list.push(clean(li[1])); gap = false; continue; }
+    const t = clean(li ? li[1] : line);
+    if (!list.length) list.push('');
+    list[list.length - 1] = list[list.length - 1] ? list[list.length - 1] + (gap ? '\n' : ' ') + t : t;
+    gap = false;
+  }
+  for (const k of ['primary', 'headline', 'description']) out[k] = out[k].map((x) => x.trim()).filter(Boolean);
+  return out;
+}
+
+// Meta ads: feed creatives (4:5, 1:1 or 1.91:1) and Stories/Reels creatives (9:16), matched by shape.
+function adArt(S, imgs, files, issues, found, used) {
+  const A = S.ads;
+  const pool = imgs.filter((im) => !/sheet|look|context|preview|mock/i.test(basename(im.file)));
+  const fits = (im, rs) => rs.some(([r, tol]) => Math.abs(im.w / im.h - r) / r <= tol);
+  for (const im of pool) {
+    const kind = fits(im, A.vertical.ratios) ? 'vertical' : fits(im, A.feed.ratios) ? 'feed' : null;
+    if (!kind) { used.add(im.file); issues.push(issue('ratio', 'error', `${im.rel} is ${im.w}×${im.h} (${(im.w / im.h).toFixed(2)}:1): not 4:5, 1:1, 1.91:1 or 9:16, so Meta crops or refuses it.`, 'Render it at 1440×1800 (feed) or 1440×2560 (Stories and Reels).')); continue; }
+    const P = A[kind]; used.add(im.file);
+    found.push({ key: kind, label: P.label, file: im.rel, w: im.w, h: im.h, format: im.format, alpha: im.alpha, kb: im.kb, abs: im.file });
+    if (!['png', 'jpeg'].includes(im.format)) issues.push(issue('format', 'error', `${im.rel} is ${im.format.toUpperCase()}; Meta takes JPG or PNG.`, 'Save it as JPG or PNG.'));
+    if (im.w < P.minW) issues.push(issue('size-' + kind, 'error', `${im.rel} is ${im.w} px wide; Meta's minimum is ${P.minW}.`, `Render it at ${P.rec.join('×')}.`));
+    else if (im.w < 1080) issues.push(issue('size-' + kind, 'warn', `${im.rel} is ${im.w}×${im.h}; Meta recommends ${P.rec.join('×')}, and it will look soft on large phones.`, `Render it at ${P.rec.join('×')}.`));
+    if (im.kb > P.maxMB * 1024) issues.push(issue('mb', 'error', `${im.rel} is over ${P.maxMB} MB.`, 'Save it as JPG at quality ~85.'));
+    if (im.alpha) issues.push(issue('alpha', 'warn', `${im.rel} has transparency; Meta fills it, often with black or white.`, 'Flatten it onto a background.'));
+  }
+  const n = (k) => found.filter((f) => f.key === k).length;
+  if (!n('feed')) issues.push(issue('missing-feed', 'error', 'No feed creative (4:5, 1440×1800 recommended; 1:1 also works). Feed is where most of the budget goes.', 'Render one at 1440×1800.'));
+  if (!n('vertical')) issues.push(issue('missing-vertical', 'error', 'No 9:16 creative for Stories and Reels. Meta would fit the feed image into a 9:16 frame with bars or a blurred fill.', 'Render one at 1440×2560 with text inside the safe zone.'));
+  const copy = readCopy(files);
+  S._copy = copy;
+  if (!copy || !copy.primary.length) issues.push(issue('missing-copy', 'warn', 'No ad copy found (copy.md with "Primary text:", "Headline:" and "Description:" lines). The sheet can\'t show where the apps cut it.', 'Write upload/copy.md.'));
+  else {
+    const T = A.text;
+    copy.primary.forEach((t, i) => {
+      if (t.length > T.primary) issues.push(issue('primary-long', 'warn', `Primary text ${i + 1} is ${t.length} characters; Meta recommends ${T.primary} for Instagram feed and Stories (the rest hides behind "… more"). Is the point and the offer in the first line?`, 'Lead with the offer; cut it to 125 or fewer.'));
+      if (t.length > T.reelsPrimary) issues.push(issue('primary-reels', 'warn', `Primary text ${i + 1} is ${t.length} characters; on Reels Meta recommends ${T.reelsPrimary}, so only about the first line shows there.`, 'Make sure the first ~40 characters stand alone.'));
+    });
+    copy.headline.forEach((t, i) => {
+      if (t.length > T.headline) issues.push(issue('headline-long', 'warn', `Headline ${i + 1} is ${t.length} characters; Meta recommends ${T.headline} (Instagram, Stories) and ${T.fbHeadline} for the Facebook feed.`, `Cut it to ${T.fbHeadline} or fewer.`));
+      else if (t.length > T.fbHeadline) issues.push(issue('headline-fb', 'warn', `Headline ${i + 1} is ${t.length} characters; the Facebook feed recommends ${T.fbHeadline} (it's cut beside the button).`, `Cut it to ${T.fbHeadline} or fewer.`));
+    });
+    if (!copy.headline.length) issues.push(issue('missing-headline', 'warn', 'No headline in the copy; the feed shows one beside the button.', 'Add a headline of 27 characters or fewer.'));
+  }
+}
+
+// Measured from the HTML each creative was made from (same base name): text and logos inside Meta's 9:16 safe zone,
+// and the smallest text as it appears on a phone (the creative shown about 375 px wide). Palm's legibility floor of
+// 11 px shown (about 42 px on a 1440-wide creative) is its own rule of thumb, not Meta's.
+async function adSafeZone(S, page, files, found, issues) {
+  const Z = S.ads.vertical.safe, PHONE = 375, MIN_SHOWN = 11;
+  for (const f of found.filter((x) => x.key === 'vertical' || x.key === 'feed')) {
+    const stem = basename(f.abs).replace(/\.\w+$/, '');
+    const html = files.find((x) => /\.html?$/i.test(x) && basename(x).replace(/\.\w+$/, '') === stem) || files.find((x) => /\.html?$/i.test(x) && basename(x).replace(/\.\w+$/, '').startsWith(stem));
+    if (!html && f.key === 'feed') continue;
+    if (!html) { issues.push(issue('no-source', 'warn', `${f.file}: no HTML of the same name beside it, so Palm can't measure where its text sits. Check the sheet's dashed safe zone by eye.`, `Keep ${stem}.html next to it.`)); continue; }
+    await page.setViewport({ width: f.w, height: f.h, deviceScaleFactor: 1 });
+    await page.goto(pathToFileURL(html).href, { waitUntil: 'load', timeout: 30000 });
+    await page.evaluate(() => document.fonts?.ready);
+    const boxes = await page.evaluate(() => {
+      const out = [];
+      const vis = (e) => { const s = getComputedStyle(e); return s.visibility !== 'hidden' && s.display !== 'none' && +s.opacity > 0.05; };
+      for (const e of document.querySelectorAll('body *')) {
+        if (!vis(e)) continue;
+        const own = [...e.childNodes].filter((n) => n.nodeType === 3 && n.textContent.trim());
+        const isLogo = (e.tagName === 'IMG' || e.tagName === 'svg') && /logo|brand|mark/i.test((e.getAttribute('class') || '') + (e.id || '') + (e.getAttribute('alt') || '') + (e.getAttribute('src') || ''));
+        if (!own.length && !isLogo) continue;
+        let r;
+        if (own.length) { const rg = document.createRange(); rg.selectNodeContents(e); r = rg.getBoundingClientRect(); } else r = e.getBoundingClientRect();
+        if (r.width < 2 || r.height < 2) continue;
+        out.push({ t: own.length ? own.map((n) => n.textContent.trim()).join(' ').slice(0, 40) : '[logo]', x: r.left, y: r.top, w: r.width, h: r.height, fs: own.length ? parseFloat(getComputedStyle(e).fontSize) : 0 });
+      }
+      return out;
+    });
+    const W = f.w, H = f.h, top = H * Z.top, bottom = H * (1 - Z.bottom), l = W * Z.side, rr = W * (1 - Z.side);
+    const scale = PHONE / W, small = boxes.filter((b) => b.fs && b.fs * scale < MIN_SHOWN).sort((a, b) => a.fs - b.fs);
+    if (small.length) issues.push(issue('text-small', 'error', `${f.file}: ${small.length} line${small.length > 1 ? 's' : ''} of text too small to read on a phone (the creative is shown about ${PHONE} px wide): ${small.slice(0, 4).map((b) => `"${b.t}" ${Math.round(b.fs)} px → ${(b.fs * scale).toFixed(1)} px on screen`).join('; ')}.`, `Make every line at least ${Math.ceil(MIN_SHOWN / scale)} px on this ${W}-wide creative, or cut it (fewer words, bigger type).`));
+    if (f.key !== 'vertical') continue;
+    const bad = boxes.filter((b) => b.y < top - 1 || b.y + b.h > bottom + 1 || b.x < l - 1 || b.x + b.w > rr + 1);
+    f.safeZone = { measured: boxes.length, outside: bad.length };
+    if (bad.length) issues.push(issue('safe-zone', 'error', `${f.file}: ${bad.length} text or logo element${bad.length > 1 ? 's' : ''} outside Meta's safe zone (keep about 14% top, 35% bottom, 6% sides clear in Stories and Reels): ${bad.slice(0, 4).map((b) => `"${b.t}" at y ${Math.round(b.y)}–${Math.round(b.y + b.h)}`).join('; ')}. The profile row, the caption and the call-to-action button cover these.`, `Move text and logos between y ${Math.round(top)} and ${Math.round(bottom)} and x ${Math.round(l)}–${Math.round(rr)}.`));
+  }
+}
+
 // Social profiles: one avatar (square) and a banner per site, matched by shape (file names break ties).
 function profileArt(S, imgs, issues, found, used) {
   const pool = imgs.filter((im) => !/sheet|look|context|preview/i.test(basename(im.file)));
@@ -269,6 +394,7 @@ export async function check(store, folder, { out = 'art' } = {}) {
   if (S.square) squareArt(S, imgs, files, issues, found, used, root);
   if (S.photos) shopPhotos(S, imgs, issues, found, used);
   if (S.profiles) profileArt(S, imgs, issues, found, used);
+  if (S.ads) adArt(S, imgs, files, issues, found, used);
   for (const a of S.assets || []) {
     let cand = imgs.filter((im) => !used.has(im.file) && (a.logo ? im.format === 'png' && ((im.w === 1280 && im.h <= 720) || (im.h === 720 && im.w <= 1280)) : im.w === a.w && im.h === a.h));
     if (a.hint && cand.length > 1) cand = cand.filter((im) => a.hint.test(im.rel)).concat(cand.filter((im) => !a.hint.test(im.rel)));
@@ -330,9 +456,10 @@ export async function check(store, folder, { out = 'art' } = {}) {
       if (store === 'google-play' && p.corner < 128 && p.center > 200) issues.push(issue('icon-rounded', 'warn', 'The icon\'s corners are transparent: it looks pre-rounded. Play applies its own mask (30% radius) and shadow, so a rounded icon ends up with a double edge or a halo.', 'Make the icon a full square; let Play round it.'));
       if (store === 'chrome-web-store' && p.edgeOpaque > 0.35) issues.push(issue('icon-padding', 'warn', `The icon's art reaches the edges (${Math.round(p.edgeOpaque * 100)}% of the outer 16 px is opaque). Chrome's spec is 96×96 art with 16 px of transparent padding each side.`, 'Shrink the art to 96×96 centred on a transparent 128×128.'));
     }
+    if (S.ads) await adSafeZone(S, page, files, found, issues);
     sheet = resolve(out + '-sheet.png');
     mkdirSync(dirname(sheet), { recursive: true });
-    const html = drawSheet(store, found);
+    const html = drawSheet(store, found, S);
     const tmp = resolve(out + '-sheet.html');
     writeFileSync(tmp, html);
     await page.setViewport({ width: 1400, height: 900, deviceScaleFactor: 1 });
@@ -348,7 +475,7 @@ export async function check(store, folder, { out = 'art' } = {}) {
 }
 
 // ---------- the sheet: each asset where and how the store shows it ----------
-function drawSheet(store, found) {
+function drawSheet(store, found, S) {
   const u = (k) => { const f = found.find((x) => x.key === k); return f ? pathToFileURL(f.abs).href : null; };
   const shots = found.filter((x) => x.key === 'screenshot').map((x) => pathToFileURL(x.abs).href);
   const img = (src, w, h, extra = '') => src ? `<img src="${src}" style="width:${w}px;height:${h}px;object-fit:cover;display:block;${extra}">` : `<div class="miss" style="width:${w}px;height:${h}px">missing</div>`;
@@ -374,6 +501,49 @@ function drawSheet(store, found) {
     body += `<div class="sec"><h2>Show cover in a list at 60 px and in search at 44 px, light and dark: can you read the name? Would you know it again?</h2><div class="row">${list('#fff', '#111', 60)}${list('#1c1c1e', '#fff', 60)}${list('#fff', '#111', 44)}</div></div>`;
     body += `<div class="sec dark" style="background:linear-gradient(#3a3a5a,#121218)"><h2 style="color:#bbb">Lock screen / Now Playing (about 300 px), and full cover at 600 px</h2><div class="row"><div style="width:340px;padding:20px;border-radius:24px;background:rgba(255,255,255,.12)">${img(cv, 300, 300, 'border-radius:12px')}<div style="margin-top:10px;font-weight:600">Episode title</div><div style="font-size:12px;opacity:.7">Your show</div></div>${img(cv, 600, 600)}</div></div>`;
     if (eps.length) body += `<div class="sec"><h2>Episode art (${eps.length}): no text, no logo; shown on Now Playing and episode pages</h2><div class="row">${eps.slice(0, 6).map((e) => img(e, 240, 240, 'border-radius:8px')).join('')}</div></div>`;
+  } else if (store === 'ads') {
+    const copy = S?._copy || { primary: [], headline: [], description: [] };
+    const esc = (s) => String(s || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+    const P = esc(copy.primary[0] || ''), Hd = esc(copy.headline[0] || ''), D = esc(copy.description[0] || '');
+    const feeds = found.filter((x) => x.key === 'feed').slice(0, 3), verts = found.filter((x) => x.key === 'vertical').slice(0, 3);
+    const src = (f) => pathToFileURL(f.abs).href;
+    const W = 375, Hs = 667; // phone width in CSS px; 9:16 screen
+    const ava = (bg) => `<div style="width:32px;height:32px;border-radius:50%;background:${bg};flex:none"></div>`;
+    // "clamp" boxes get "… more" when they overflow (script at the end of the sheet).
+    const clamp = (txt, lines, more, style = '', bg = '#fff') => `<div class="clamp" data-more="${more}" data-bg="${bg}" style="display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:${lines};overflow:hidden;position:relative;white-space:pre-line;${style}">${txt || '<i style="opacity:.5">(no primary text)</i>'}</div>`;
+    const fb = (f) => `<div style="width:${W}px;background:#fff;color:#050505;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.2);font:15px/1.34 -apple-system,system-ui,sans-serif">
+      <div style="display:flex;gap:8px;align-items:center;padding:12px 12px 6px">${ava('#c9ccd1')}<div><div style="font-weight:600">Your brand</div><div style="font-size:12px;color:#65676b">Ad · 🌐</div></div></div>
+      <div style="padding:0 12px 8px">${clamp(P, 3, 'See more')}</div>
+      <img src="${src(f)}" style="width:${W}px;height:${Math.round(W * f.h / f.w)}px;object-fit:cover;display:block">
+      <div style="display:flex;gap:10px;align-items:center;background:#f0f2f5;padding:10px 12px"><div style="flex:1;min-width:0"><div style="font-size:12px;color:#65676b;text-transform:uppercase">yourshop.com</div>${clamp(Hd ? `<b>${Hd}</b>` : '<i style="opacity:.5">(no headline)</i>', 1, '', 'font-size:16px')}${D ? clamp(D, 1, '', 'font-size:13px;color:#65676b') : ''}</div><div style="background:#e4e6eb;border-radius:6px;padding:8px 12px;font-weight:600;white-space:nowrap">Shop now</div></div></div>`;
+    const ig = (f) => `<div style="width:${W}px;background:#000;color:#f5f5f5;font:14px/1.35 -apple-system,system-ui,sans-serif">
+      <div style="display:flex;gap:8px;align-items:center;padding:10px 12px">${ava('#444')}<div><div style="font-weight:600">yourbrand</div><div style="font-size:11px;opacity:.7">Ad</div></div><div style="margin-left:auto">•••</div></div>
+      <img src="${src(f)}" style="width:${W}px;height:${Math.round(W * f.h / f.w)}px;object-fit:cover;display:block">
+      <div style="display:flex;justify-content:space-between;padding:11px 12px;border-bottom:1px solid #262626;font-weight:600">Shop now<span>›</span></div>
+      <div style="padding:8px 12px 2px;font-size:20px;letter-spacing:6px">♡ ◯ ➤</div>
+      <div style="padding:2px 12px 12px">${clamp(`<b>yourbrand</b> ${P}`, 2, 'more', '', '#000')}</div></div>`;
+    const story = (f, zone) => `<div class="box" style="width:${W}px;height:${Hs}px;background:#111;overflow:hidden;border-radius:14px;color:#fff;font:14px/1.3 -apple-system,system-ui,sans-serif">
+      <img src="${src(f)}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">
+      <div style="position:absolute;left:8px;right:8px;top:8px;display:flex;gap:3px">${[0, 1, 2].map((i) => `<div style="flex:1;height:2px;background:rgba(255,255,255,${i ? 0.4 : 0.95})"></div>`).join('')}</div>
+      <div style="position:absolute;left:12px;right:12px;top:20px;display:flex;gap:8px;align-items:center;text-shadow:0 1px 2px rgba(0,0,0,.5)">${ava('rgba(255,255,255,.55)')}<b>yourbrand</b><span style="opacity:.85">Ad</span><span style="margin-left:auto;font-size:20px">✕</span></div>
+      <div style="position:absolute;left:0;right:0;bottom:0;height:200px;background:linear-gradient(transparent,rgba(0,0,0,.55))"></div>
+      <div style="position:absolute;left:16px;right:16px;bottom:96px;text-shadow:0 1px 2px rgba(0,0,0,.6)">${clamp(P, 2, 'more', '', 'rgba(30,30,30,.92)')}</div>
+      <div style="position:absolute;left:50%;transform:translateX(-50%);bottom:40px;background:#fff;color:#000;border-radius:22px;padding:10px 22px;font-weight:600;white-space:nowrap">⌃ Shop now</div>
+      ${zone ? `<div class="zone" style="left:${W * 0.06}px;right:${W * 0.06}px;top:${Hs * 0.14}px;bottom:${Hs * 0.35}px"></div>` : ''}</div>`;
+    const reel = (f) => `<div class="box" style="width:${W}px;height:${Hs}px;background:#111;overflow:hidden;border-radius:14px;color:#fff;font:14px/1.3 -apple-system,system-ui,sans-serif">
+      <img src="${src(f)}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">
+      <div style="position:absolute;left:14px;top:16px;font-size:20px;font-weight:700;text-shadow:0 1px 2px rgba(0,0,0,.5)">Reels</div>
+      <div style="position:absolute;left:0;right:0;bottom:0;height:260px;background:linear-gradient(transparent,rgba(0,0,0,.6))"></div>
+      <div style="position:absolute;right:12px;bottom:120px;display:flex;flex-direction:column;gap:20px;align-items:center;font-size:24px;text-shadow:0 1px 2px rgba(0,0,0,.6)"><span>♡</span><span>◯</span><span>➤</span><span>•••</span><div style="width:28px;height:28px;border-radius:6px;border:2px solid #fff;background:#555"></div></div>
+      <div style="position:absolute;left:12px;right:64px;bottom:150px;display:flex;gap:8px;align-items:center;text-shadow:0 1px 2px rgba(0,0,0,.6)">${ava('rgba(255,255,255,.55)')}<b>yourbrand</b><span style="border:1px solid #fff;border-radius:6px;padding:1px 8px;font-size:12px">Follow</span></div>
+      <div style="position:absolute;left:12px;right:64px;bottom:118px;text-shadow:0 1px 2px rgba(0,0,0,.6)">${clamp(P, 1, 'more', '', 'rgba(30,30,30,.92)')}</div>
+      <div style="position:absolute;left:12px;right:64px;bottom:96px;font-size:12px;opacity:.85">Ad · ♫ Original audio</div>
+      <div style="position:absolute;left:12px;right:12px;bottom:56px;background:rgba(255,255,255,.18);border-radius:8px;padding:9px 12px;font-weight:600;display:flex;justify-content:space-between">Shop now<span>›</span></div>
+      <div style="position:absolute;left:0;right:0;bottom:0;height:46px;background:#000;display:flex;justify-content:space-around;align-items:center;font-size:18px;opacity:.95"><span>⌂</span><span>⌕</span><span>⊕</span><span>▶</span><span>◯</span></div></div>`;
+    const lens = `${copy.primary.length} primary text${copy.primary.length === 1 ? '' : 's'} (first: ${copy.primary[0]?.length ?? 0} characters), ${copy.headline.length} headline${copy.headline.length === 1 ? '' : 's'} (first: ${copy.headline[0]?.length ?? 0})`;
+    body += `<div class="sec" style="background:#f0f2f5"><h2>Feed at phone width: Facebook (light) and Instagram (dark), with the copy cut where the apps cut it (${lens}; line cuts are Palm's approximation of the apps)</h2><div class="row">${feeds.length ? feeds.map((f) => `<div>${fb(f)}<div class="lab">${esc(f.file)} · ${f.w}×${f.h}</div></div><div>${ig(f)}</div>`).join('') : `<div class="miss" style="width:${W}px;height:${W * 1.25}px">no feed creative (4:5)</div>`}</div></div>`;
+    body += `<div class="sec dark" style="background:#1c1c1e"><h2 style="color:#aaa">Stories and Reels at phone size with the app's buttons over the creative; then Meta's safe zone (dashed: keep text and logos inside; about 14% top, 35% bottom, 6% sides)</h2>${verts.length ? verts.map((f) => `<div class="row" style="margin-bottom:18px"><div>${story(f, false)}<div class="lab">Stories · ${esc(f.file)} · ${f.w}×${f.h}</div></div><div>${reel(f)}<div class="lab">Reels</div></div><div>${story(f, true)}<div class="lab">Meta's safe zone</div></div></div>`).join('') : `<div class="miss" style="width:${W}px;height:${Hs}px">no 9:16 creative for Stories and Reels</div>`}</div>`;
+    body += `<script>for (const e of document.querySelectorAll('.clamp')) { if (e.scrollHeight > e.clientHeight + 1 && e.dataset.more) { const m = document.createElement('span'); m.textContent = '… ' + e.dataset.more; m.style.cssText = 'position:absolute;right:0;bottom:0;padding:0 0 0 6px;font-weight:600;background:' + e.dataset.bg + ';color:inherit'; e.appendChild(m); } }</script>`;
   } else if (store === 'profiles') {
     const F = (k) => found.find((x) => x.key === k);
     const av = F('avatar'), avu = av ? pathToFileURL(av.abs).href : null;
@@ -529,6 +699,23 @@ async function selfTest() {
   for (const [n, sz] of [['youtube', '2560x1440'], ['x-header', '1500x500'], ['linkedin', '1584x396'], ['linkedin-page', '1512x256'], ['facebook', '851x315']]) await render(join(d, 'feature.html'), { out: join(pk, n + '.jpg'), size: sz, jpeg: true });
   const pg = await check('profiles', pk, { out: join(d, 'profok') });
   if (pg.issues.length || pg.found.length !== 6) throw new Error('profiles clean kit: ' + pg.issues.map((i) => i.id).join(',') + ' found ' + pg.found.map((f) => f.key).join(','));
+  // Meta ads: a wrong-ratio image, a 9:16 story with its offer in the bottom 35%, no feed creative and a long headline;
+  // then a clean set (4:5 feed, 9:16 with centred text, short copy) with no issues.
+  const ad = join(d, 'ads'); mkdirSync(ad);
+  writeFileSync(join(ad, 'story.html'), '<html><body style="margin:0;width:1440px;height:2560px;background:#2a6;position:relative;font:bold 120px sans-serif;color:#fff"><div style="position:absolute;left:120px;top:2200px">20% off</div><div style="position:absolute;left:300px;top:1200px">Spring</div><div style="position:absolute;left:300px;top:1400px;font-size:28px">only 60 made</div></body></html>');
+  await render(join(ad, 'story.html'), { out: join(ad, 'story.jpg'), size: '1440x2560', jpeg: true });
+  await render(join(d, 'feature.html'), { out: join(ad, 'wide.jpg'), size: '1200x1000', jpeg: true });
+  writeFileSync(join(ad, 'copy.md'), '# Ad copy\nPrimary text: Spring is here.\nHeadline: Our whole spring range of hand-thrown stoneware, now 20% off\n');
+  const ab = await check('ads', ad, { out: join(d, 'adbad') });
+  for (const want of ['ratio', 'safe-zone', 'missing-feed', 'headline-long', 'text-small']) if (!ab.issues.some((i) => i.id === want)) throw new Error('ads: expected ' + want + ' in ' + ab.issues.map((i) => i.id).join(','));
+  if (ab.issues.find((i) => i.id === 'safe-zone').msg.includes('Spring')) throw new Error('ads: centred text wrongly flagged');
+  const ak = join(d, 'ads-ok'); mkdirSync(ak);
+  writeFileSync(join(ak, 'story.html'), '<html><body style="margin:0;width:1440px;height:2560px;background:#2a6;display:flex;align-items:center;justify-content:center;font:bold 140px sans-serif;color:#fff">20% off</body></html>');
+  await render(join(ak, 'story.html'), { out: join(ak, 'story.jpg'), size: '1440x2560', jpeg: true });
+  await render(join(d, 'feature.html'), { out: join(ak, 'feed.jpg'), size: '1440x1800', jpeg: true });
+  writeFileSync(join(ak, 'copy.md'), 'Primary text: Spring sale: 20% off mugs.\nHeadline: 20% off all mugs\nDescription: Ends Sunday\n');
+  const ag = await check('ads', ak, { out: join(d, 'adok') });
+  if (ag.issues.length || ag.found.length !== 2) throw new Error('ads clean set: ' + ag.issues.map((i) => i.id + ' ' + i.msg).join(' | ') + ' found ' + ag.found.map((f) => f.key).join(','));
   console.log(`store-art: all tests pass (play ${r.errors} errors, steam ${s.errors} errors; sheet ${r.sheet})`);
 }
 
@@ -542,5 +729,5 @@ if (typeof process !== 'undefined' && process.argv?.[1] === fileURLToPath(import
   if (argv.includes('--test')) selfTest().then(() => process.exit(0), (e) => { console.error(e); process.exit(1); });
   else if (pos[0] === 'render' && pos[1]) render(pos[1], { out: opt('out', 'out.png'), size: opt('size'), jpeg: argv.includes('--jpeg'), alpha: argv.includes('--alpha'), quality: +opt('quality', 90) }).then(done, fail);
   else if (pos[0] === 'check' && pos[1] && pos[2]) check(pos[1], pos[2], { out: opt('out', 'art') }).then(done, fail);
-  else fail('usage: store-art.mjs check <google-play|chrome-web-store|steam|apple-podcasts|etsy|shopify|profiles> <folder> [--out art]\n       store-art.mjs render <design.html> --size 1024x500 --out upload/feature.png [--jpeg] [--alpha]');
+  else fail('usage: store-art.mjs check <google-play|chrome-web-store|steam|apple-podcasts|etsy|shopify|profiles|ads> <folder> [--out art]\n       store-art.mjs render <design.html> --size 1024x500 --out upload/feature.png [--jpeg] [--alpha]');
 }

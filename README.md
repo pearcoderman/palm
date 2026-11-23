@@ -11,11 +11,14 @@ Then just ask: *"make an Instagram post for our bakery's Saturday sourdough"*, *
 
 ## Tested blind before it ships
 
-Every part runs the same test: the same agent and request, with and without Palm, judged blind by a separate session that never knows which used Palm. If the agent already does the job well, we cut it (we cut App Store keywords, a web-app builder and an app-icon sheet).
+Every part runs the same test: the same agent and request, with and without Palm, judged blind by a separate session that never knows which used Palm. If the agent already does the job well, we cut it (so far: App Store keywords, a web-app builder, an app-icon sheet, email deliverability and paid-social ads).
 
 | Job | Picked blind (or measured) with Palm | Tier |
 |---|---|---|
+| Weekly content kit: one post → newsletter, share image, social posts and story | 18 of 18 (measured 3 of 3 vs 0 of 3) | Pro |
+| Website icons (favicon, Apple touch icon, maskable) | 18 of 18 | Pro |
 | App Store screenshots + preview video | 17 of 18 | Pro |
+| Mac App Store screenshots | 14 of 18 | Pro |
 | Link previews (iMessage, WhatsApp, Slack, X, LinkedIn…) | 17 of 18 | Pro |
 | Idea to launch: app, page, link, email, posts, Product Hunt, launch week | 16 of 18 (measured 3 of 3 vs 0 of 3) | Pro |
 | Launch landing page for an app or product | 16 of 18 | Pro |
@@ -31,6 +34,7 @@ Every part runs the same test: the same agent and request, with and without Palm
 | Accessibility (WCAG 2.2 AA) | 3 of 3 clean (0 of 3 without) | Free |
 | Chrome Web Store images | 13 of 18 | Free |
 | Etsy / Shopify listing photos from your own photos | 14 of 18 | Free |
+| Social profile kit (avatar + YouTube, X, LinkedIn, Facebook banners) | 13 of 18 (measured 3 of 3 vs 0 of 3) | Free |
 
 ## What's in it
 
@@ -42,12 +46,14 @@ Every part runs the same test: the same agent and request, with and without Palm
 - `web-icons`: a site's favicon, Apple touch icon and manifest/maskable icons checked (tags, sizes, transparency, the maskable safe zone, contrast on light and dark tabs) and drawn in browser tabs, on iPhone and Android home screens and in the install prompt; renders SVG to PNG and packs favicon.ico.
 - `design-check`, `aso-keywords`, and dated, sourced data: platform image sizes and limits (Instagram 3:4, 5 hashtags, YouTube 3840×2160, LinkedIn's 2026 cover…), App Store specs.
 
-**Palm Pro ($15/month or $150/year), fetched with your key:**
+**Palm Pro ($15/month or $150/year, 7-day free trial), fetched with your key:**
 - `store-shots` + `store-media`: App Store screenshots at exact size, seen in a real-size search result; checks and builds app preview videos (886×1920, 15–30 s, audio track).
 - `email-render`: your email in forced dark mode, full invert, Apple Mail dark, images blocked and `<style>` stripped; Gmail clipping, unsubscribe.
-- `share-preview`: every page's link card in seven apps, from the raw HTML; renders 1200×630 share images.
+- `share-preview`: every page's link card in seven apps, from the raw HTML; renders 1200×630 share images; draws social posts where people see them (Instagram feed and 3:4 grid, a story under the app's bars, LinkedIn, X), captions cut where each app cuts them.
 - `site-speed`: Core Web Vitals measured on a throttled phone, with right-sized WebP copies.
 - `review-scan`: App Review pre-submission scan of your project against the October 2026 guidelines.
+
+- **Palm Watch**: ask your agent to watch up to 10 of your pages; Palm re-checks them daily on its server (no AI) and tells your agent what broke and what was fixed.
 
 Set `PALM_KEY` in your shell profile and restart Claude Code. Keys: https://www.yuzool.com/palm/#pro
 
