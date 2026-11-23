@@ -1,13 +1,16 @@
 #!/usr/bin/env node
-// Palm tool: store-art — checks a folder of store graphics for Google Play, the Chrome Web Store or Steam against the
+// Palm tool: store-art — checks a folder of store graphics for Google Play, the Chrome Web Store, Steam, Apple Podcasts,
+// Etsy or Shopify against the
 // stores' current rules (exact sizes, formats, alpha, counts, the sizes Steam stopped accepting in Aug 2024, banned
 // words in the HTML they were made from), and draws them the way each store shows them: the Play icon under its mask
 // at list size, the feature graphic at phone width with its cutoff zones, the Chrome tile at half size on the grey
-// page, Steam's small capsule at 120×45 and 184×69 in a search row, the library grid and the hero with its safe area.
+// page, Steam's small capsule at 120×45 and 184×69 in a search row, the library grid and the hero with its safe area,
+// a podcast cover at 60 px in a list and on a lock screen, and a shop's first photo in the square, portrait and
+// landscape crops a marketplace grid uses.
 // One sheet to LOOK at, plus measured problems. Also renders an HTML design to an image at an exact size.
 // adds: tool, fresh-data. Runs on the user's machine with their Chrome/Edge/Chromium; nothing leaves it.
 //
-//   node store-art.mjs check <google-play|chrome-web-store|steam> <folder> [--out art]
+//   node store-art.mjs check <google-play|chrome-web-store|steam|apple-podcasts|etsy|shopify> <folder> [--out art]
 //       → JSON {ok, store, found:[{key, file, w, h}], missing, issues} and <out>-sheet.png. Then LOOK at the sheet.
 //   node store-art.mjs render <design.html> --size 1024x500 --out upload/feature.png [--jpeg] [--alpha]
 //       → renders the HTML at exactly that size. PNGs are flattened (no alpha) unless --alpha (icons, Steam logo).
@@ -105,6 +108,24 @@ export const STORES = {
     words: [/\bwishlist/i, /\bpre-?(order|purchase)/i, /\bbuy now\b/i, /\bplay now\b/i, /\bavailable now\b/i, /\bout now\b/i, /\bcoming soon\b/i, /\b\d{1,3}\s?% (off|discount)/i, /\bsale\b/i, /\baward/i, /\bgame of the year\b/i, /\bgoty\b/i, /\boverwhelmingly positive\b/i, /\bvery positive\b/i, /\b\d+\/10\b/, /★/],
     wordsWhy: 'Steam capsules may show only game art, the game name and an official subtitle: no review scores, awards, sale text or calls to action (rule in force since 1 Sept 2022).',
   },
+  // podcasters.apple.com/support/5514 (show cover) and 5516 (episode art)
+  'apple-podcasts': {
+    name: 'Apple Podcasts',
+    square: { min: 1400, max: 3000, best: 3000, formats: ['png', 'jpeg'], noAlpha: true },
+    words: [], wordsWhy: '',
+  },
+  // help.etsy.com/hc/en-us/articles/115015663347
+  etsy: {
+    name: 'Etsy',
+    photos: { min: 1, firstMin: 635, rec: 2000, maxKBWarn: 1024, formats: ['jpeg', 'png', 'gif'], noAlpha: 'Etsy shows transparent parts of an image as black.', firstLandscapeOrSquare: true },
+    words: [], wordsWhy: '',
+  },
+  // help.shopify.com/en/manual/products/product-media/product-media-types
+  shopify: {
+    name: 'Shopify',
+    photos: { min: 1, maxSide: 5000, maxMP: 25, maxMB: 20, squareRec: 2048, sameRatio: true, formats: ['jpeg', 'png', 'gif', 'webp'] },
+    words: [], wordsWhy: '',
+  },
 };
 
 function walk(dir, out = []) {
@@ -137,6 +158,48 @@ async function htmlText(file) {
   return s.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
 }
 
+// Apple Podcasts: one show cover (required) and episode art (optional, file names with "episode"), square 1400–3000.
+function squareArt(S, imgs, files, issues, found, used, root) {
+  const q = S.square;
+  const isEp = (f) => /episode|(^|[^a-z])ep[\s_-]?\d/i.test(basename(f));
+  const ep = imgs.filter((im) => isEp(im.file)), covers = imgs.filter((im) => !isEp(im.file) && !/sheet|look|context/i.test(basename(im.file))).sort((a, b) => (/cover|show/i.test(basename(b.file)) ? 1 : 0) - (/cover|show/i.test(basename(a.file)) ? 1 : 0));
+  const one = (im, key, label) => {
+    used.add(im.file); found.push({ key, label, file: im.rel, w: im.w, h: im.h, format: im.format, alpha: im.alpha, kb: im.kb, abs: im.file });
+    if (im.w !== im.h) issues.push(issue('square-' + key, 'error', `${label} ${im.rel} is ${im.w}×${im.h}; it must be square.`, `Make it ${q.best}×${q.best}.`));
+    else if (im.w < q.min || im.w > q.max) issues.push(issue('size-' + key, 'error', `${label} ${im.rel} is ${im.w}×${im.h}; Apple Podcasts accepts ${q.min}×${q.min} to ${q.max}×${q.max}.`, `Make it ${q.best}×${q.best}.`));
+    else if (im.w < q.best) issues.push(issue('size-' + key, 'warn', `${label} is ${im.w}×${im.h}; Apple prefers the largest, ${q.best}×${q.best}.`, `Render it at ${q.best}×${q.best}.`));
+    if (!q.formats.includes(im.format)) issues.push(issue('format-' + key, 'error', `${label} ${im.rel} is ${im.format.toUpperCase()}; it must be PNG or JPG.`, 'Save it as PNG or JPG.'));
+    if (q.noAlpha && im.alpha) issues.push(issue('alpha-' + key, 'error', `${label} ${im.rel} has an alpha channel; Apple says artwork can't contain transparency and shouldn't have an alpha channel.`, 'Render it without --alpha (store-art flattens PNGs), or save as JPG.'));
+  };
+  if (!covers.length) issues.push(issue('missing-cover', 'error', `No show cover (square, ${q.min}–${q.max} px; ${q.best}×${q.best} preferred).`, `Render it with --size ${q.best}x${q.best}.`));
+  else { one(covers[0], 'cover', 'Show cover'); for (const im of covers.slice(1)) issues.push(issue('extra', 'warn', `${im.rel}: only one show cover is used; name episode art with "episode" or "ep1" in the file name.`, 'Remove or rename it.')); }
+  for (const im of ep) one(im, 'episode', 'Episode art');
+  S._episodeHtml = files.filter((f) => isEp(f) && /\.html?$/i.test(f));
+}
+
+// Etsy / Shopify: every image is a listing photo, in file-name order (the first is the main photo).
+function shopPhotos(S, imgs, issues, found, used) {
+  const p = S.photos;
+  const photos = imgs.filter((im) => !/sheet|look|context/i.test(basename(im.file))).sort((a, b) => a.rel.localeCompare(b.rel));
+  if (photos.length < p.min) issues.push(issue('photos-count', 'error', `No listing photos found.`, 'Add them.'));
+  photos.forEach((im, i) => {
+    used.add(im.file); found.push({ key: i ? 'photo' : 'main', label: i ? `Photo ${i + 1}` : 'Main photo', file: im.rel, w: im.w, h: im.h, format: im.format, alpha: im.alpha, kb: im.kb, abs: im.file });
+    if (!p.formats.includes(im.format)) issues.push(issue('format', 'error', `${im.rel} is ${im.format.toUpperCase()}; ${S.name} takes ${p.formats.map((f) => f.toUpperCase()).join(', ')}.`, 'Save it as JPG or PNG.'));
+    if (p.noAlpha && im.alpha) issues.push(issue('alpha', 'error', `${im.rel} has transparency. ${p.noAlpha}`, 'Flatten it onto a background (render without --alpha, or save as JPG).'));
+    if (p.firstMin && i === 0 && Math.min(im.w, im.h) < p.firstMin) issues.push(issue('main-small', 'error', `The first photo is ${im.w}×${im.h}; Etsy wants at least ${p.firstMin} px on each side or the listing shows lower in search.`, `Make it at least ${p.rec}×${p.rec}.`));
+    else if (p.rec && Math.min(im.w, im.h) < p.rec) issues.push(issue('photo-small', 'warn', `${im.rel} is ${im.w}×${im.h}; Etsy recommends at least ${p.rec} px on each side.`, `Render it at ${p.rec} px or more.`));
+    if (p.firstLandscapeOrSquare && i === 0 && im.h > im.w) issues.push(issue('main-portrait', 'error', `The first photo is portrait (${im.w}×${im.h}); Etsy says the first photo should be landscape or square so its thumbnails crop well.`, 'Make the first photo landscape or square, with a border the crops can lose.'));
+    if (p.maxKBWarn && im.kb > p.maxKBWarn) issues.push(issue('photo-kb', 'warn', `${im.rel} is ${im.kb} KB; Etsy says images over 1 MB may not finish uploading on a slow connection.`, 'Save as JPG at quality ~85.'));
+    if (p.maxSide && (im.w > p.maxSide || im.h > p.maxSide || im.w * im.h > p.maxMP * 1e6)) issues.push(issue('photo-big', 'error', `${im.rel} is ${im.w}×${im.h}; Shopify takes up to ${p.maxSide}×${p.maxSide} px or ${p.maxMP} megapixels.`, 'Make it smaller (2048×2048 for square photos).'));
+    if (p.maxMB && im.kb > p.maxMB * 1024) issues.push(issue('photo-mb', 'error', `${im.rel} is over ${p.maxMB} MB.`, 'Compress it.'));
+    if (p.squareRec && im.w === im.h && im.w < p.squareRec) issues.push(issue('photo-small', 'warn', `${im.rel} is ${im.w}×${im.h}; for square product photos Shopify says ${p.squareRec}×${p.squareRec} usually displays best.`, `Render it at ${p.squareRec}×${p.squareRec}.`));
+  });
+  if (p.sameRatio && photos.length > 1) {
+    const r = (im) => (im.w / im.h).toFixed(2), first = r(photos[0]), odd = photos.filter((im) => r(im) !== first);
+    if (odd.length) issues.push(issue('ratio-mixed', 'warn', `Not all photos share the main photo's aspect ratio (${photos[0].w}×${photos[0].h}): ${odd.map((x) => `${x.rel} ${x.w}×${x.h}`).join(', ')}. Shopify themes show images at the same size only with a consistent aspect ratio.`, 'Use one aspect ratio for the main photos.'));
+  }
+}
+
 export async function check(store, folder, { out = 'art' } = {}) {
   const S = STORES[store];
   if (!S) throw new Error(`store must be one of: ${Object.keys(STORES).join(', ')}`);
@@ -151,7 +214,9 @@ export async function check(store, folder, { out = 'art' } = {}) {
   // Steam: sizes it stopped accepting in Aug 2024.
   for (const [w, h, what] of S.old || []) for (const im of imgs) if (im.w === w && im.h === h) { issues.push(issue('old-size', 'error', `${im.rel} is ${w}×${h}, the old ${what}. Steam no longer accepts the old sizes (since Aug 2024).`, 'Make it at the current size.')); used.add(im.file); }
 
-  for (const a of S.assets) {
+  if (S.square) squareArt(S, imgs, files, issues, found, used, root);
+  if (S.photos) shopPhotos(S, imgs, issues, found, used);
+  for (const a of S.assets || []) {
     let cand = imgs.filter((im) => !used.has(im.file) && (a.logo ? im.format === 'png' && ((im.w === 1280 && im.h <= 720) || (im.h === 720 && im.w <= 1280)) : im.w === a.w && im.h === a.h));
     if (a.hint && cand.length > 1) cand = cand.filter((im) => a.hint.test(im.rel)).concat(cand.filter((im) => !a.hint.test(im.rel)));
     else if (a.hint && cand.length === 1 && !a.hint.test(cand[0].rel) && S.assets.some((b) => b !== a && b.w === a.w && b.h === a.h)) cand = a.fallback ? [] : cand;
@@ -171,7 +236,7 @@ export async function check(store, folder, { out = 'art' } = {}) {
   }
 
   // Screenshots: everything else that isn't one of the named assets.
-  const sh = S.shots, shots = imgs.filter((im) => !used.has(im.file) && !/sheet|look|preview-|context/i.test(basename(im.file)));
+  const sh = S.shots || { min: 0, label: 'Screenshots' }, shots = !S.shots ? [] : imgs.filter((im) => !used.has(im.file) && !/sheet|look|preview-|context/i.test(basename(im.file)));
   const good = [], bad = [];
   for (const im of shots) {
     const long = Math.max(im.w, im.h), short = Math.min(im.w, im.h); let why = null;
@@ -193,6 +258,7 @@ export async function check(store, folder, { out = 'art' } = {}) {
   for (const im of good) found.push({ key: 'screenshot', label: sh.label, file: im.rel, w: im.w, h: im.h, format: im.format, kb: im.kb, abs: im.file });
 
   // Banned words in the HTML the graphics were made from.
+  for (const f of S._episodeHtml || []) { const t = await htmlText(f); if (t.length) issues.push(issue('episode-text', 'error', `Episode art (${relative(root, f)}) has text ("${t.slice(0, 40)}"); Apple says to avoid any text or the podcast logo in episode art.`, 'Remove the text; let the image carry the episode.')); }
   for (const f of files.filter((x) => /\.html?$/i.test(x))) {
     const t = await htmlText(f), hits = [...new Set(S.words.map((r) => (t.match(r) || [])[0]).filter(Boolean))];
     if (hits.length) issues.push(issue('words', 'error', `${relative(root, f)} says ${hits.map((h) => `"${h}"`).join(', ')}. ${S.wordsWhy}`, 'Take those words out of the graphic.'));
@@ -249,6 +315,21 @@ function drawSheet(store, found) {
     body += `<div class="sec" style="background:#f1f3f4"><h2>Small promo tile on the store's grey page: at half size (220×140, the store says it must read there) among others, and full size</h2><div class="row">${[0, 1, 2].map((i) => `<div style="background:#fff;border-radius:8px;overflow:hidden;width:220px">${i === 1 ? img(st, 220, 140) : '<div style="width:220px;height:140px;background:#c9d3dc"></div>'}<div style="padding:8px;font-size:12px">${i === 1 ? '<b>Your extension</b>' : 'Other extension'}</div></div>`).join('')}<div>${img(st, 440, 280)}<div class="lab">440×280</div></div></div></div>`;
     body += `<div class="sec"><h2>Marquee tile (home page carousel), at 700×280</h2>${img(mq, 700, 280)}</div>`;
     body += `<div class="sec"><h2>Screenshots as shown (640×400)</h2><div class="row">${shots.slice(0, 5).map((s) => `<img src="${s}" style="width:640px;height:400px;object-fit:fill;display:block;border:1px solid #ddd">`).join('') || '<div class="miss" style="width:640px;height:400px">no screenshots</div>'}</div></div>`;
+  } else if (store === 'apple-podcasts') {
+    const cv = u('cover'), eps = found.filter((x) => x.key === 'episode').map((x) => pathToFileURL(x.abs).href);
+    const list = (bg, fg, sz) => `<div style="background:${bg};color:${fg};padding:14px;border-radius:12px;width:360px">${[0, 1, 2, 3].map((i) => `<div style="display:flex;gap:12px;align-items:center;margin:8px 0">${i === 1 ? img(cv, sz, sz, 'border-radius:6px') : `<div style="width:${sz}px;height:${sz}px;border-radius:6px;background:hsl(${i * 80 + 20},45%,${fg === '#fff' ? 35 : 70}%)"></div>`}<div><div style="font-weight:600;font-size:13px">${i === 1 ? 'Your show' : 'Another show'}</div><div style="font-size:11px;opacity:.6">Episode · 42 min</div></div></div>`).join('')}</div>`;
+    body += `<div class="sec"><h2>Show cover in a list at 60 px and in search at 44 px, light and dark: can you read the name? Would you know it again?</h2><div class="row">${list('#fff', '#111', 60)}${list('#1c1c1e', '#fff', 60)}${list('#fff', '#111', 44)}</div></div>`;
+    body += `<div class="sec dark" style="background:linear-gradient(#3a3a5a,#121218)"><h2 style="color:#bbb">Lock screen / Now Playing (about 300 px), and full cover at 600 px</h2><div class="row"><div style="width:340px;padding:20px;border-radius:24px;background:rgba(255,255,255,.12)">${img(cv, 300, 300, 'border-radius:12px')}<div style="margin-top:10px;font-weight:600">Episode title</div><div style="font-size:12px;opacity:.7">Your show</div></div>${img(cv, 600, 600)}</div></div>`;
+    if (eps.length) body += `<div class="sec"><h2>Episode art (${eps.length}): no text, no logo; shown on Now Playing and episode pages</h2><div class="row">${eps.slice(0, 6).map((e) => img(e, 240, 240, 'border-radius:8px')).join('')}</div></div>`;
+  } else if (store === 'etsy' || store === 'shopify') {
+    const main = u('main'), all = found.filter((x) => x.key === 'main' || x.key === 'photo').map((x) => pathToFileURL(x.abs).href);
+    const ph = (i) => `<div style="width:100%;height:100%;background:hsl(${i * 47 + 30},18%,${80 - (i % 3) * 6}%)"></div>`;
+    const card = (w, h, i, mine) => `<div style="width:${w}px"><div style="width:${w}px;height:${h}px;overflow:hidden;border-radius:${store === 'etsy' ? 8 : 4}px">${mine ? img(main, w, h, 'object-position:center') : ph(i)}</div><div style="font-size:12px;margin-top:6px">${mine ? '<b>Your product</b>' : 'Another product'}</div><div style="font-size:12px;opacity:.7">$24.00</div></div>`;
+    body += `<div class="sec"><h2>${store === 'etsy' ? 'Etsy crops the first photo to square, portrait and landscape thumbnails, centred: is the product whole in each?' : 'Collection grid (square, as most themes crop): does the product read among others?'}</h2><div class="row">${store === 'etsy'
+      ? `<div>${img(main, 240, 240)}<div class="lab">square</div></div><div>${img(main, 200, 250)}<div class="lab">portrait 4:5</div></div><div>${img(main, 300, 225)}<div class="lab">landscape 4:3</div></div>`
+      : ''}</div><div class="row" style="margin-top:16px">${[0, 1, 2, 3, 4].map((i) => card(store === 'etsy' ? 210 : 190, store === 'etsy' ? 168 : 190, i, i === 1)).join('')}</div></div>`;
+    body += `<div class="sec"><h2>Listing page: main photo large with the others as thumbnails, in order (${all.length})</h2><div class="row"><div>${img(main, 520, 520, 'object-fit:contain;background:#f5f5f5')}</div><div style="display:grid;grid-template-columns:repeat(4,110px);gap:8px">${all.map((s) => `<img src="${s}" style="width:110px;height:110px;object-fit:cover;display:block;border:1px solid #ddd">`).join('')}</div></div></div>`;
+    body += `<div class="sec"><h2>On a phone (390 px wide)</h2>${img(main, 390, 390, 'object-fit:contain;background:#f5f5f5')}</div>`;
   } else {
     const g = (k) => u(k);
     const searchRow = (w, h, title) => `<div style="display:flex;gap:10px;align-items:center;background:#16202d;padding:6px;margin:4px 0;width:620px">${img(g('small'), w, h)}<div style="color:#c7d5e0;font-size:13px">${title}</div></div>`;
@@ -341,6 +422,17 @@ async function selfTest() {
   writeFileSync(join(d, 'up', 'feature.html'), '<p>Best app, download now</p>');
   const w = await check('google-play', join(d, 'up'), { out: join(d, 'gp2') });
   if (!w.issues.some((i) => i.id === 'words')) throw new Error('words not flagged');
+  // Podcasts: wrong size and alpha; episode text.
+  const pd = join(d, 'pod'); mkdirSync(pd);
+  await render(join(d, 'feature.html'), { out: join(pd, 'cover.png'), size: '1200x1200', alpha: true });
+  writeFileSync(join(pd, 'episode-1.html'), '<p>Episode 1</p>');
+  const pc = await check('apple-podcasts', pd, { out: join(d, 'pod') });
+  for (const want of ['size-cover', 'episode-text']) if (!pc.issues.some((i) => i.id === want)) throw new Error('podcasts: expected ' + want + ' in ' + pc.issues.map((i) => i.id).join(','));
+  // Etsy: portrait first photo, too small.
+  const ed = join(d, 'etsy'); mkdirSync(ed);
+  await render(join(d, 'feature.html'), { out: join(ed, '01.png'), size: '500x700' });
+  const et = await check('etsy', ed, { out: join(d, 'etsy') });
+  for (const want of ['main-small']) if (!et.issues.some((i) => i.id === want)) throw new Error('etsy: expected ' + want + ' in ' + et.issues.map((i) => i.id).join(','));
   console.log(`store-art: all tests pass (play ${r.errors} errors, steam ${s.errors} errors; sheet ${r.sheet})`);
 }
 
@@ -354,5 +446,5 @@ if (typeof process !== 'undefined' && process.argv?.[1] === fileURLToPath(import
   if (argv.includes('--test')) selfTest().then(() => process.exit(0), (e) => { console.error(e); process.exit(1); });
   else if (pos[0] === 'render' && pos[1]) render(pos[1], { out: opt('out', 'out.png'), size: opt('size'), jpeg: argv.includes('--jpeg'), alpha: argv.includes('--alpha'), quality: +opt('quality', 90) }).then(done, fail);
   else if (pos[0] === 'check' && pos[1] && pos[2]) check(pos[1], pos[2], { out: opt('out', 'art') }).then(done, fail);
-  else fail('usage: store-art.mjs check <google-play|chrome-web-store|steam> <folder> [--out art]\n       store-art.mjs render <design.html> --size 1024x500 --out upload/feature.png [--jpeg] [--alpha]');
+  else fail('usage: store-art.mjs check <google-play|chrome-web-store|steam|apple-podcasts|etsy|shopify> <folder> [--out art]\n       store-art.mjs render <design.html> --size 1024x500 --out upload/feature.png [--jpeg] [--alpha]');
 }

@@ -22,12 +22,14 @@ Every part runs the same test: the same agent and request, with and without Palm
 | Newsletter / marketing email | 16 of 18 (measured 100 vs 64–70) | Pro |
 | Steam store and library art | 16 of 18 (measured 3 of 3 vs 2 of 3) | Pro |
 | Google Play icon, feature graphic, screenshots | 15 of 18 | Pro |
+| Podcast cover and episode art (Apple Podcasts) | 17 of 18 | Pro |
 | Slow website made fast | 3 of 3 reached good LCP (0 of 3 without) | Pro |
 | Instagram carousel | 9 of 9 | Free |
 | YouTube thumbnail | 4 of 4 | Free |
 | Small-business website | 6 of 9 | Free |
 | Accessibility (WCAG 2.2 AA) | 3 of 3 clean (0 of 3 without) | Free |
 | Chrome Web Store images | 13 of 18 | Free |
+| Etsy / Shopify listing photos from your own photos | 14 of 18 | Free |
 
 ## What's in it
 
@@ -35,7 +37,7 @@ Every part runs the same test: the same agent and request, with and without Palm
 - `design-render`: renders a design with the real fonts at the real size and measures every line (collisions, split words, text too small for a phone).
 - `site-render`: a web page on a phone and a desktop, light and dark, measured (sideways scrolling, contrast, tap targets, covered headings).
 - `a11y-check`: WCAG 2.2 AA by using the page: tabs through it and photographs every focus state, contrast against the real pixels behind text, 320px reflow, motion.
-- `store-art`: Google Play, Chrome Web Store and Steam graphics checked against each store's current rules (sizes, alpha, banned words, Steam's 2024 capsule sizes) and drawn where the store shows them; renders HTML at exact sizes.
+- `store-art`: Google Play, Chrome Web Store, Steam, Apple Podcasts, Etsy and Shopify graphics checked against each store's current rules (sizes, alpha, banned words, Steam's 2024 capsule sizes) and drawn where the store shows them; renders HTML at exact sizes.
 - `design-check`, `aso-keywords`, and dated, sourced data: platform image sizes and limits (Instagram 3:4, 5 hashtags, YouTube 3840×2160, LinkedIn's 2026 cover…), App Store specs.
 
 **Palm Pro ($15/month or $150/year), fetched with your key:**
