@@ -35,6 +35,8 @@ Every part runs the same test: the same agent and request, with and without Palm
 | Chrome Web Store images | 13 of 18 | Free |
 | Etsy / Shopify listing photos from your own photos | 14 of 18 | Free |
 | Social profile kit (avatar + YouTube, X, LinkedIn, Facebook banners) | 13 of 18 (measured 3 of 3 vs 0 of 3) | Free |
+| Print-ready business cards and flyers | 11 of 18 | Free |
+| Pitch deck (projector, video call, the PDF that gets sent) | 11 of 18 (measured 3 of 3 vs 1 of 3) | Free |
 
 ## What's in it
 
@@ -44,6 +46,7 @@ Every part runs the same test: the same agent and request, with and without Palm
 - `a11y-check`: WCAG 2.2 AA by using the page: tabs through it and photographs every focus state, contrast against the real pixels behind text, 320px reflow, motion.
 - `store-art`: Google Play, Chrome Web Store, Steam, Apple Podcasts, Etsy and Shopify graphics checked against each store's current rules (sizes, alpha, banned words, Steam's 2024 capsule sizes) and drawn where the store shows them; renders HTML at exact sizes.
 - `web-icons`: a site's favicon, Apple touch icon and manifest/maskable icons checked (tags, sizes, transparency, the maskable safe zone, contrast on light and dark tabs) and drawn in browser tabs, on iPhone and Android home screens and in the install prompt; renders SVG to PNG and packs favicon.ico.
+- `deck-check`: a slide deck (HTML or PDF) checked slide by slide at 1920×1080: text off the slide, cut off in its box or overlapping, the smallest text, words per slide, contrast against the real pixels and on a washed-out projector, a deck cut off on a 1440×900 laptop, and the PDF that gets sent (one 16:9 page per slide, backgrounds kept); drawn as presenter thumbnails, on a projector, in a video call and as an email attachment. `pdf` makes a clean 16:9 PDF. Keep print-check.mjs beside it.
 - `print-check`: print-ready PDFs for business cards, flyers and posters (exact trim + bleed with the trim box set) and any PDF checked: bleed that really runs to the edge, text near the cut, photo ppi at print size, smallest text and line, embedded fonts; drawn as cut with the blade 1 mm off and at real size. Pages are drawn with Ghostscript, pdftoppm, mutool or PyMuPDF, whichever is installed.
 - `design-check`, `aso-keywords`, and dated, sourced data: platform image sizes and limits (Instagram 3:4, 5 hashtags, YouTube 3840×2160, LinkedIn's 2026 cover…), App Store specs.
 
