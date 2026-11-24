@@ -15,6 +15,11 @@
 //   node deck-check.mjs pdf <deck.html> --out deck.pdf
 //       → a PDF with one 16:9 page per slide, backgrounds kept, text kept as text; then checks it.
 //   PPTX: converted with LibreOffice (soffice) if installed; otherwise export to PDF and check that.
+//   node deck-check.mjs linkedin <carousel.pdf|carousel.html> [--post post.md] [--title title.txt|"…"] [--out look/linkedin]
+//       → a LinkedIn PDF carousel (document post) as the feed shows it: JSON {ok, pages, shape, per_page, issues, sheet}
+//         and <out>-sheet.png: the post in the phone feed (light, dark) with its text cut at "…see more" and the title
+//         over page 1, every page at the real phone size, and the desktop feed. LinkedIn's limits are official; the
+//         viewer sizes and text thresholds are Palm's measurement and guidance (see LI below).
 //
 // Thresholds are Palm's guidance, not a published standard (none covers slides): text under 20 px on a 1920-wide
 // slide shows under 10 px when a call shows the slide about 960 px wide (error); under 28 px is hard to read from the
@@ -413,6 +418,119 @@ export async function makePdf(target, { out = 'deck.pdf' } = {}) {
   return { pdf: o, ...r };
 }
 
+// ---------- linkedin: a PDF carousel ("document post") as LinkedIn's feed shows it ----------
+// Official (LinkedIn Help, read 2026-11-24): documents up to 100 MB and 300 pages; PPT, PPTX, DOC, DOCX or PDF (PDF
+// recommended); "PDFs with multiple sized pages must be fit to the same page size"; add a title; hyperlinks must be
+// secure; animations show as still images; posts up to 3,000 characters (linkedin.com/help/linkedin/answer/a518909,
+// a528176). Palm's measurement, not LinkedIn's: the document viewer is about 390 px wide on a phone and 555 px in the
+// desktop feed, and the post text shows about 3 lines before "…see more". Text-size thresholds are Palm's guidance.
+export const LI = { maxMB: 100, maxPages: 300, postMax: 3000, phoneW: 390, deskW: 555, errPx: 9, warnPx: 12, hookPx: 22, words: 45 };
+async function htmlToPdf(file, out) {
+  const browser = await launch();
+  try {
+    const page = await browser.newPage(); await page.setViewport({ width: 1080, height: 1350, deviceScaleFactor: 1 });
+    await go(page, pathToFileURL(resolve(file)).href); await page.evaluate(() => document.fonts?.ready);
+    const ids = await page.evaluate(TAG);
+    const sz = await page.evaluate((ids) => { const e = document.querySelector(`[data-palm-slide="${ids[0]}"]`); return e ? { W: e.offsetWidth, H: e.offsetHeight } : { W: 1080, H: 1350 }; }, ids);
+    await page.addStyleTag({ content: `@page{size:${sz.W}px ${sz.H}px;margin:0}html,body{margin:0!important}[data-palm-slide]{break-after:page;break-inside:avoid;-webkit-print-color-adjust:exact;print-color-adjust:exact}` });
+    writeFileSync(out, await page.pdf({ width: `${sz.W}px`, height: `${sz.H}px`, printBackground: true, margin: { top: 0, right: 0, bottom: 0, left: 0 } }));
+  } finally { await browser.close(); }
+  return out;
+}
+export async function linkedin(target, { post = null, title = null, out = 'look/linkedin', plain = false } = {}) {
+  const pc = await PRINT(); if (!pc) throw new Error('print-check.mjs must be beside deck-check.mjs (get it with palm_tool).');
+  const outFile = resolve(out); mkdirSync(dirname(outFile), { recursive: true });
+  let pdf = resolve(target);
+  if (/\.html?$/i.test(pdf)) pdf = await htmlToPdf(pdf, outFile + '.pdf');
+  const buf = readFileSync(pdf), mb = buf.length / 1048576;
+  const insp = pc.inspectPdf(buf);
+  const issues = []; const add = (id, level, msg, extra) => issues.push(issue(id, level, msg, extra));
+  const postText = post && existsSync(post) ? readFileSync(post, 'utf8').trim() : (post || '');
+  const titleText = title && existsSync(title) ? readFileSync(title, 'utf8').trim() : (title || '');
+  const P = insp.pages;
+  if (!P.length) throw new Error('No pages in ' + pdf);
+  if (mb > LI.maxMB) add('li-file-big', 'error', `The file is ${mb.toFixed(1)} MB; LinkedIn takes documents up to 100 MB.`);
+  if (P.length > LI.maxPages) add('li-pages', 'error', `${P.length} pages; LinkedIn takes up to 300.`);
+  const same = P.every((p) => Math.abs(p.w - P[0].w) < 1 && Math.abs(p.h - P[0].h) < 1);
+  if (!same) add('li-mixed-sizes', 'error', 'Pages are different sizes. LinkedIn says pages must be fit to the same size; mixed pages jump in the viewer.');
+  const r0 = P[0].w / P[0].h;
+  const shape = Math.abs(r0 - 1) < 0.03 ? '1:1' : Math.abs(r0 - 0.8) < 0.03 ? '4:5' : Math.abs(r0 - 16 / 9) < 0.04 ? '16:9' : `${P[0].w.toFixed(0)}×${P[0].h.toFixed(0)} mm`;
+  if (r0 > 1.05) add('li-landscape', 'warn', `Pages are landscape (${shape}). In the phone feed a landscape page is about ${Math.round(LI.phoneW / r0)} px tall, so everything on it is small; square (1:1) or portrait (4:5) fills the screen (Palm's measurement).`);
+  if (/\/URI\s*\(\s*http:/.test(buf.toString('latin1'))) add('li-insecure-link', 'warn', 'The PDF has an http:// link; LinkedIn asks for secure (https) links.');
+  const pages = P.map((p, i) => {
+    const k = LI.phoneW / p.w; // css px per mm on a phone
+    const px = p.text.map((t) => Math.round(t.size * (25.4 / 72) * k * 10) / 10);
+    const chars = p.text.reduce((a, t) => a + (t.n || 0), 0);
+    return { n: i + 1, w_mm: Math.round(p.w), h_mm: Math.round(p.h), min_px: px.length ? Math.min(...px) : null, max_px: px.length ? Math.max(...px) : null, words_est: Math.round(chars / 6), text_runs: p.text.length };
+  });
+  for (const pg of pages) {
+    if (pg.min_px == null) { if (pg.n === 1) add('li-no-text', 'warn', 'Page 1 has no real text (an image of text?), so sizes can\'t be measured; LinkedIn shows it as the cover.', { page: 1 }); continue; }
+    if (pg.min_px < LI.errPx) add('li-text-small', 'error', `Page ${pg.n}: the smallest text is ${pg.min_px} px on a phone (the viewer is about ${LI.phoneW} px wide). Under ${LI.errPx} px can't be read without zooming, which the viewer doesn't allow.`, { page: pg.n });
+    else if (pg.min_px < LI.warnPx) add('li-text-small', 'warn', `Page ${pg.n}: the smallest text is ${pg.min_px} px on a phone; under ${LI.warnPx} px is a strain to read while scrolling.`, { page: pg.n });
+    if (pg.words_est > LI.words) add('li-words', 'warn', `Page ${pg.n}: about ${pg.words_est} words (estimated from the PDF). People swipe in a second or two per page; over ~${LI.words} words they skip it (Palm's guidance).`, { page: pg.n });
+  }
+  if (pages[0].max_px != null && pages[0].max_px < LI.hookPx) add('li-hook-small', 'warn', `Page 1 is the only page most people see; its biggest text is ${pages[0].max_px} px on a phone. Make the hook at least ${LI.hookPx} px there.`, { page: 1 });
+  if (!titleText) add('li-no-title', 'warn', 'No document title. LinkedIn asks for one and shows it on the document in the feed (pass --title "…" or a title.txt).');
+  if (postText.length > LI.postMax) add('li-post-long', 'error', `The post text is ${postText.length} characters; LinkedIn posts take up to 3,000.`);
+  if (!postText) add('li-no-post', 'warn', 'No post text given (pass --post post.md). The text above the document is what makes people open it.');
+  // draw the pages
+  const dpi = Math.max(30, Math.min(300, Math.round(780 / (P[0].w / 25.4))));
+  const r = pc.rasterize(pdf, dpi, outFile + '-pages');
+  if (!r.files.length) add('no-renderer', 'warn', 'No PDF renderer found, so the pages aren\'t drawn. Install Ghostscript (brew install ghostscript), poppler (pdftoppm) or PyMuPDF.');
+  const sheet = outFile + '-sheet.png';
+  if (r.files.length) await drawLinkedIn({ files: r.files, pages, postText, titleText, ratio: P[0].h / P[0].w, plain }, sheet);
+  const errors = issues.filter((i) => i.level === 'error').length, warnings = issues.filter((i) => i.level === 'warn').length;
+  return { ok: errors === 0, errors, warnings, file: pdf, size_mb: Math.round(mb * 100) / 100, pages: pages.length, shape, same_size: same, post_chars: postText.length, title: titleText || null, per_page: pages, issues, sheet: existsSync(sheet) ? sheet : null };
+}
+async function drawLinkedIn({ files, pages, postText, titleText, ratio, plain }, outFile) {
+  const browser = await launch();
+  try {
+    const page = await browser.newPage(); await page.setViewport({ width: 1500, height: 1000, deviceScaleFactor: 1 });
+    const src = (f) => 'data:image/png;base64,' + readFileSync(f).toString('base64');
+    const esc = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    const card = (w, dark, n) => `<div class="card ${dark ? 'dk' : ''}" style="width:${w}px">
+      <div class="hd"><div class="av"></div><div><b>Priya Raman</b><div class="sub">Co-founder · 2h · 🌐</div></div></div>
+      <div class="txt" data-full="${esc(postText || '').replace(/"/g, '&quot;')}"></div>
+      <div class="doc"><div class="tb">${esc(titleText || 'Untitled document')} · ${pages.length} pages</div>
+        <div class="pv" style="height:${Math.round(w * Math.min(ratio, 1.25))}px"><img src="${src(files[n])}"></div></div>
+      <div class="act"><span>👍 Like</span><span>💬 Comment</span><span>↻ Repost</span><span>➤ Send</span></div></div>`;
+    const html = `<!doctype html><html><head><style>
+      body{margin:0;font:14px/1.4 -apple-system,system-ui,sans-serif;background:#ecebe8;color:#111;width:1500px}
+      .sec{padding:22px 28px;background:#fff;margin-bottom:10px}.sec.dkbg{background:#000}
+      h2{font-size:13px;letter-spacing:.05em;text-transform:uppercase;color:#555;margin:0 0 12px}.dkbg h2{color:#999}
+      .row{display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap}.lab{font-size:12px;color:#555;margin-top:4px}
+      .card{background:#fff;border:1px solid #ddd;border-radius:8px;overflow:hidden;color:#191919}.card.dk{background:#1b1f23;border-color:#333;color:#e9e9e9}
+      .hd{display:flex;gap:8px;padding:12px;align-items:center}.av{width:40px;height:40px;border-radius:50%;background:#9aa7b4}.sub{font-size:12px;opacity:.65}
+      .txt{padding:0 12px;margin-bottom:10px;line-height:1.4;white-space:pre-wrap;overflow-wrap:anywhere}.txt .more{opacity:.65;font-weight:600}
+      .doc{position:relative}.tb{position:absolute;left:0;right:0;top:0;z-index:2;background:rgba(0,0,0,.72);color:#fff;font-size:13px;padding:7px 10px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .pv{position:relative;overflow:hidden;background:#f3f2ef;display:flex;align-items:center;justify-content:center}.dk .pv{background:#000}
+      .pv img{width:100%;display:block}.pn{position:absolute;right:8px;bottom:8px;background:rgba(0,0,0,.7);color:#fff;font-size:12px;border-radius:10px;padding:2px 8px}
+      .nx{position:absolute;right:6px;top:50%;margin-top:-16px;width:32px;height:32px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;font-size:22px;text-align:center;line-height:30px}
+      .act{display:flex;justify-content:space-around;padding:10px 4px;font-size:13px;opacity:.75;border-top:1px solid rgba(128,128,128,.25)}
+      .pg{width:390px}.pg img{width:390px;display:block;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+    </style></head><body>
+      <div class="sec"><h2>In the phone feed (light): what people see before they swipe${plain ? '' : ` · post text cut after about 3 lines, title bar over the first page (Palm's measurement)`}</h2><div class="row">${card(LI.phoneW, false, 0)}</div></div>
+      <div class="sec dkbg"><h2>In the phone feed (dark mode)</h2><div class="row">${card(LI.phoneW, true, 0)}</div></div>
+      <div class="sec"><h2>Every page as it's swiped on a phone (${pages.length} pages, shown ${LI.phoneW} px wide, the real size)</h2><div class="row">
+        ${files.map((f, i) => `<div class="pg"><img src="${src(f)}"><div class="lab">${i + 1}${plain ? '' : ` · smallest ${pages[i]?.min_px ?? '–'} px · ~${pages[i]?.words_est ?? '?'} words`}</div></div>`).join('')}</div></div>
+      <div class="sec"><h2>In the desktop feed (${LI.deskW} px)</h2><div class="row">${card(LI.deskW, false, 0)}</div></div>
+    </body></html>`;
+    await page.setContent(html, { waitUntil: 'load' });
+    await page.evaluate(() => Promise.all([...document.images].map((i) => i.complete ? 0 : new Promise((r) => { i.onload = r; i.onerror = r; }))));
+    // "…see more": keep as much of the text as fits in 3 lines, then "… see more" inline (Palm's measurement of the feed)
+    await page.evaluate(() => {
+      for (const t of document.querySelectorAll('.txt')) {
+        const full = t.dataset.full || '', lh = parseFloat(getComputedStyle(t).lineHeight) || 20, max = lh * 3 + 2;
+        const set = (n) => { t.textContent = full.slice(0, n).replace(/\s+$/, ''); if (n < full.length) { t.append('… '); const m = document.createElement('span'); m.className = 'more'; m.textContent = 'see more'; t.append(m); } };
+        set(full.length); if (t.scrollHeight <= max) continue;
+        let lo = 0, hi = full.length; while (lo < hi) { const mid = (lo + hi + 1) >> 1; set(mid); if (t.scrollHeight <= max) lo = mid; else hi = mid - 1; }
+        set(lo);
+      }
+    });
+    await page.screenshot({ path: outFile, fullPage: true });
+  } finally { await browser.close(); }
+}
+
 // ---------- self-test ----------
 async function selfTest() {
   const d = mkdtempSync(join(tmpdir(), 'deck-test-'));
@@ -448,18 +566,33 @@ async function selfTest() {
   // contrast maths
   if (Math.abs(ratio([0, 0, 0], [255, 255, 255]) - 21) > 0.01) throw new Error('ratio');
   if (!(ratio(projector([0, 0, 0]), projector([255, 255, 255])) < 21)) throw new Error('projector');
-  console.log(`deck-check: all tests pass (bad: ${[...ids].join(',')}; good: ${good.slides.length} slides, PDF ${good.pdf.pages} pages ${good.pdf.size}; pdf command: ${made.pdf.pages} pages ${made.pdf.size}; sheet ${good.sheet})`);
+  // linkedin: a landscape carousel with tiny text, no title and an over-long post; then a clean 4:5 one
+  DBG('test: linkedin');
+  writeFileSync(join(d, 'li-bad.html'), `<html><head><style>body{margin:0;font-family:Helvetica}section{width:1920px;height:1080px;position:relative;background:#fff;color:#111;overflow:hidden}h1{font-size:60px;margin:80px}p{font-size:22px;margin:0 80px}</style></head><body>
+    <section><h1>Q3 update</h1><p>${'a lot of small words on one slide '.repeat(12)}</p></section><section><h1>Numbers</h1><p>tiny footnote</p></section><section><h1>Thanks</h1></section></body></html>`);
+  const lb = await linkedin(join(d, 'li-bad.html'), { post: 'x'.repeat(3100), out: join(d, 'look/li-bad') });
+  const lids = new Set(lb.issues.map((i) => i.id));
+  for (const want of ['li-landscape', 'li-text-small', 'li-no-title', 'li-post-long', 'li-words']) if (!lids.has(want)) throw new Error(`linkedin bad: expected ${want}, got ${[...lids].join(',')}`);
+  if (lb.pages !== 3) throw new Error('linkedin bad: pages ' + lb.pages);
+  writeFileSync(join(d, 'li-good.html'), `<html><head><style>body{margin:0;font-family:Helvetica}section{width:1080px;height:1350px;position:relative;background:#14213D;color:#F7F5F0;overflow:hidden}h1{font-size:110px;line-height:1.05;margin:120px 90px 40px}p{font-size:48px;line-height:1.3;margin:0 90px}</style></head><body>
+    <section><h1>Month-end close takes 7.5 days.</h1><p>Data entry is only 11% of it.</p></section><section><h1>38% is waiting.</h1><p>For receipts, contracts and approvals.</p></section>
+    <section><h1>Chase on the 25th.</h1><p>Every missing item, a name and a date.</p></section></body></html>`);
+  const lg = await linkedin(join(d, 'li-good.html'), { post: 'We timed 41 month-end closes. The slow part isn\'t data entry.', title: 'Where month-end close time goes', out: join(d, 'look/li-good') });
+  if (lg.errors || lg.warnings) throw new Error('linkedin good flagged: ' + lg.issues.map((i) => i.id + ' ' + i.msg).join(' | '));
+  if (lg.shape !== '4:5' || !existsSync(lg.sheet)) throw new Error('linkedin good: shape ' + lg.shape + ' sheet ' + lg.sheet);
+  console.log(`deck-check: all tests pass (bad: ${[...ids].join(',')}; good: ${good.slides.length} slides, PDF ${good.pdf.pages} pages ${good.pdf.size}; pdf command: ${made.pdf.pages} pages ${made.pdf.size}; sheet ${good.sheet}; linkedin bad: ${[...lids].join(',')}, good sheet ${lg.sheet})`);
 }
 
 if (typeof process !== 'undefined' && process.argv?.[1] === fileURLToPath(import.meta.url)) {
   const argv = process.argv.slice(2);
   const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 ? argv[i + 1] : d; };
-  const VALUED = new Set(['--out', '--pdf']);
+  const VALUED = new Set(['--out', '--pdf', '--post', '--title']);
   const pos = argv.filter((a, i) => !a.startsWith('--') && !VALUED.has(argv[i - 1]));
   const done = (r) => { console.log(JSON.stringify(r, null, 2)); process.exit(r.ok ? 0 : 1); };
   const fail = (e) => { console.error(String(e.message || e)); process.exit(2); };
   if (argv.includes('--test')) selfTest().then(() => process.exit(0), (e) => { console.error(e); process.exit(1); });
   else if (pos[0] === 'check' && pos[1]) check(pos[1], { out: opt('out', 'look/deck'), pdf: opt('pdf') }).then(done, fail);
   else if (pos[0] === 'pdf' && pos[1]) makePdf(pos[1], { out: opt('out', 'deck.pdf') }).then(done, fail);
-  else fail('usage: deck-check.mjs check <deck.html|deck.pdf|deck.pptx> [--pdf deck.pdf] [--out look/deck]\n       deck-check.mjs pdf <deck.html> --out deck.pdf');
+  else if (pos[0] === 'linkedin' && pos[1]) linkedin(pos[1], { post: opt('post'), title: opt('title'), out: opt('out', 'look/linkedin') }).then(done, fail);
+  else fail('usage: deck-check.mjs check <deck.html|deck.pdf|deck.pptx> [--pdf deck.pdf] [--out look/deck]\n       deck-check.mjs pdf <deck.html> --out deck.pdf\n       deck-check.mjs linkedin <carousel.pdf|carousel.html> [--post post.md] [--title "…"|title.txt] [--out look/linkedin]');
 }
