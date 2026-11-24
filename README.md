@@ -34,6 +34,7 @@ Every part runs the same test: the same agent and request, with and without Palm
 | Accessibility (WCAG 2.2 AA) | 3 of 3 clean (0 of 3 without) | Free |
 | Chrome Web Store images | 13 of 18 | Free |
 | Etsy / Shopify listing photos from your own photos | 14 of 18 | Free |
+| Pinterest pins for a post or product | 18 of 18 | Pro |
 | Social profile kit (avatar + YouTube, X, LinkedIn, Facebook banners) | 13 of 18 (measured 3 of 3 vs 0 of 3) | Free |
 | Print-ready business cards and flyers | 11 of 18 | Free |
 | Pitch deck (projector, video call, the PDF that gets sent) | 11 of 18 (measured 3 of 3 vs 1 of 3) | Free |
@@ -46,7 +47,7 @@ Every part runs the same test: the same agent and request, with and without Palm
 - `design-render`: renders a design with the real fonts at the real size and measures every line (collisions, split words, text too small for a phone).
 - `site-render`: a web page on a phone and a desktop, light and dark, measured (sideways scrolling, contrast, tap targets, covered headings).
 - `a11y-check`: WCAG 2.2 AA by using the page: tabs through it and photographs every focus state, contrast against the real pixels behind text, 320px reflow, motion.
-- `store-art`: Google Play, Chrome Web Store, Steam, Apple Podcasts, Etsy and Shopify graphics checked against each store's current rules (sizes, alpha, banned words, Steam's 2024 capsule sizes) and drawn where the store shows them; renders HTML at exact sizes.
+- `store-art`: Google Play, Chrome Web Store, Steam, Apple Podcasts, Etsy and Shopify graphics, and Pinterest pins in the desktop and phone feeds, checked against each store's current rules (sizes, alpha, banned words, Steam's 2024 capsule sizes) and drawn where the store shows them; renders HTML at exact sizes.
 - `web-icons`: a site's favicon, Apple touch icon and manifest/maskable icons checked (tags, sizes, transparency, the maskable safe zone, contrast on light and dark tabs) and drawn in browser tabs, on iPhone and Android home screens and in the install prompt; renders SVG to PNG and packs favicon.ico.
 - `video-check`: a short vertical video seen inside Instagram Reels, TikTok and YouTube Shorts at phone size, with each app's buttons and caption over it; on a Mac it reads the words on screen and flags captions under an app's interface, too small or too brief to read; the cover in each profile grid; size, frame rate, length and audio. Needs ffmpeg.
 - `menu-check`: a café or restaurant menu seen the way guests meet it: the printed page in daylight, dim light and close up; the phone page the QR opens at 390 px, light and dark (text cut off at the edge, prices drifting from dishes, allergen notes too small, no dark mode); and the QR code decoded from the printed page as a phone camera sees it from the table (size, quiet zone, where it points). Needs print-check beside it and `npm i jsqr`.

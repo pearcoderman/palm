@@ -11,10 +11,13 @@
 // Reels) in the Facebook and Instagram apps at phone size with their buttons over them, the copy cut where the apps cut
 // it, and text measured against Meta's 9:16 safe zone from the HTML each creative was made from.
 // (The ads check is kept for reference; its job sheet didn't ship: a blind tie, PALM-AGENTS-PLAN.md.)
+// And Pinterest pins in the desktop home feed (~236 px columns) and the phone app (two columns), light and dark, with the
+// hover buttons, titles cut at the 40 characters Pinterest says may show, too-tall pins cut at 2:3, text measured at feed
+// size from each pin's HTML, and pins that look alike at feed size.
 // One sheet to LOOK at, plus measured problems. Also renders an HTML design to an image at an exact size.
 // adds: tool, fresh-data. Runs on the user's machine with their Chrome/Edge/Chromium; nothing leaves it.
 //
-//   node store-art.mjs check <google-play|chrome-web-store|steam|apple-podcasts|etsy|shopify|profiles|ads> <folder> [--out art]
+//   node store-art.mjs check <google-play|chrome-web-store|steam|apple-podcasts|etsy|shopify|profiles|ads|pinterest> <folder> [--out art]
 //       → JSON {ok, store, found:[{key, file, w, h}], missing, issues} and <out>-sheet.png. Then LOOK at the sheet.
 //   node store-art.mjs render <design.html> --size 1024x500 --out upload/feature.png [--jpeg] [--alpha]
 //       → renders the HTML at exactly that size. PNGs are flattened (no alpha) unless --alpha (icons, Steam logo).
@@ -153,6 +156,19 @@ STORES.profiles = {
   words: [], wordsWhy: '',
 };
 
+// Pinterest pins. Official, Pinterest's "Review ad specs" (help.pinterest.com/en/business/article/pinterest-product-specs,
+// read 2026-11-24; it says the image specs apply to ads and organic Pins): 2:3 recommended (1000×1500); "Pins with an
+// aspect ratio greater than 2:3 might get cut off in people's feeds"; PNG or JPEG, 20 MB (desktop) / 32 MB (app); title
+// up to 100 characters, "the first 40 characters may show in people's feeds"; description up to 800, not shown in the
+// home or search feed. Palm's estimates, not Pinterest's (the sheet says so): the web feed's ~236 px columns and the
+// app's two ~183 px columns on a 390 px phone, the hover buttons' positions, where a too-tall pin gets cut (drawn at 2:3),
+// and the legibility floor (8 px as shown on a phone; the headline at least 14 px).
+STORES.pinterest = {
+  name: 'Pinterest',
+  pins: { ratio: 1.5, rec: [1000, 1500], maxMB: 20, titleMax: 100, titleShown: 40, descMax: 800, desktopCol: 236, phoneCol: 183, minShown: 8, headShown: 14 },
+  words: [], wordsWhy: '',
+};
+
 // Meta ads (Facebook and Instagram feed, Stories, Reels). Official, Meta Ads Guide read 2026-11-23: feed 4:5 at 1440×1800
 // (FB min width 600, 3% tolerance; IG min width 500, 1% tolerance, widest 1.91:1); Stories/Reels 9:16 at 1440×2560 (min
 // width 500, 1% tolerance); JPG or PNG up to 30 MB; text: IG feed primary 125 / headline 40, FB feed primary 50–150 /
@@ -271,6 +287,98 @@ async function adSafeZone(S, page, files, found, issues) {
     const bad = boxes.filter((b) => b.y < top - 1 || b.y + b.h > bottom + 1 || b.x < l - 1 || b.x + b.w > rr + 1);
     f.safeZone = { measured: boxes.length, outside: bad.length };
     if (bad.length) issues.push(issue('safe-zone', 'error', `${f.file}: ${bad.length} text or logo element${bad.length > 1 ? 's' : ''} outside Meta's safe zone (keep about 14% top, 35% bottom, 6% sides clear in Stories and Reels): ${bad.slice(0, 4).map((b) => `"${b.t}" at y ${Math.round(b.y)}–${Math.round(b.y + b.h)}`).join('; ')}. The profile row, the caption and the call-to-action button cover these.`, `Move text and logos between y ${Math.round(top)} and ${Math.round(bottom)} and x ${Math.round(l)}–${Math.round(rr)}.`));
+  }
+}
+
+// Pinterest: the pin images (any portrait images) and pins.md with each pin's title and description
+// ("## Pin 1" sections with "Title:" and "Description:" lines, or just Title:/Description: lines in order).
+export function readPinCopy(files) {
+  const f = files.find((x) => /(^|[\/\\])pins?\.(md|txt)$/i.test(x)) || files.find((x) => /pin|copy|title/i.test(basename(x)) && /\.(md|txt)$/i.test(x) && !/readme|brief|post/i.test(basename(x)));
+  if (!f) return null;
+  const out = { file: f, title: [], description: [] };
+  let cur = null;
+  for (const line of readFileSync(f, 'utf8').split(/\r?\n/)) {
+    const m = line.match(/^\s*(?:[-*]\s*)?\**\s*(?:pin\s*\d+\s*)?(title|description)\s*\**\s*[:：]\s*\**\s*(.*?)\s*\**\s*$/i);
+    if (m) { cur = m[1].toLowerCase(); out[cur].push(m[2].replace(/^["“]|["”]$/g, '')); continue; }
+    if (/^\s*#{1,6}\s/.test(line) || /^\s*(---|\*\*\*)\s*$/.test(line)) { cur = null; continue; }
+    if (cur && line.trim() && out[cur].length) { const L = out[cur]; L[L.length - 1] = (L[L.length - 1] ? L[L.length - 1] + ' ' : '') + line.trim(); }
+    else if (!line.trim()) cur = cur === 'description' ? 'description' : null;
+  }
+  for (const k of ['title', 'description']) out[k] = out[k].map((x) => x.trim()).filter(Boolean);
+  return out;
+}
+
+function pinArt(S, imgs, files, issues, found, used) {
+  const P = S.pins;
+  const pool = imgs.filter((im) => !/sheet|look|context|preview|mock|photo|raw|source|logo/i.test(basename(im.file)) && im.h > im.w * 1.05);
+  for (const im of pool.sort((a, b) => a.rel.localeCompare(b.rel))) {
+    used.add(im.file);
+    found.push({ key: 'pin', label: 'Pin', file: im.rel, w: im.w, h: im.h, format: im.format, alpha: im.alpha, kb: im.kb, abs: im.file });
+    const r = im.h / im.w;
+    if (!['png', 'jpeg'].includes(im.format)) issues.push(issue('format', 'error', `${im.rel} is ${im.format.toUpperCase()}; Pinterest takes PNG or JPEG.`, 'Save it as PNG or JPEG.'));
+    if (r > P.ratio * 1.02) issues.push(issue('pin-tall', 'warn', `${im.rel} is ${im.w}×${im.h} (1:${r.toFixed(2)}), taller than 2:3. Pinterest says pins taller than 2:3 might get cut off in people's feeds; the sheet draws where (at 2:3, Palm's assumption).`, 'Make it 1000×1500, or keep everything important in the top 2:3.'));
+    else if (r < P.ratio * 0.92) issues.push(issue('pin-short', 'warn', `${im.rel} is ${im.w}×${im.h} (1:${r.toFixed(2)}); Pinterest recommends 2:3, and a shorter pin takes less of the feed.`, 'Make it 1000×1500.'));
+    if (im.w < P.rec[0]) issues.push(issue('pin-small', 'warn', `${im.rel} is ${im.w} px wide; Pinterest recommends ${P.rec.join('×')}.`, `Render it at ${P.rec.join('×')}.`));
+    if (im.kb > P.maxMB * 1024) issues.push(issue('mb', 'error', `${im.rel} is over ${P.maxMB} MB.`, 'Save it as JPEG at quality ~85.'));
+    if (im.alpha) issues.push(issue('alpha', 'warn', `${im.rel} has transparency; Pinterest converts uploads to JPEG, so it gets a background.`, 'Flatten it.'));
+  }
+  if (!found.some((f) => f.key === 'pin')) issues.push(issue('missing-pin', 'error', 'No pin images (portrait PNG or JPEG; 1000×1500 recommended).', 'Render each pin with: render pin1.html --size 1000x1500 --out pins/pin1.png'));
+  const copy = readPinCopy(files); S._pins = copy;
+  const n = found.filter((f) => f.key === 'pin').length;
+  if (!copy || !copy.title.length) issues.push(issue('missing-title', 'warn', 'No pin titles found (pins.md with a "Title:" and "Description:" line per pin). Titles show under pins in the feed and in search.', 'Write pins.md next to the images.'));
+  else {
+    if (copy.title.length < n) issues.push(issue('missing-title', 'warn', `${n} pins but ${copy.title.length} title${copy.title.length === 1 ? '' : 's'} in pins.md.`, 'Give every pin its own title.'));
+    copy.title.forEach((t, i) => {
+      if ([...t].length > P.titleMax) issues.push(issue('title-long', 'error', `Title ${i + 1} is ${[...t].length} characters; Pinterest takes up to ${P.titleMax}.`, `Cut it to ${P.titleMax}.`));
+      else if ([...t].length > P.titleShown) issues.push(issue('title-cut', 'tip', `Title ${i + 1}: only about the first ${P.titleShown} characters may show in feeds: "${[...t].slice(0, P.titleShown).join('')}…". Are the words people search for in that part?`, 'Lead with the search words.'));
+    });
+    if (new Set(copy.title.map((t) => t.toLowerCase())).size < copy.title.length) issues.push(issue('title-same', 'warn', 'Two pins have the same title.', 'Give each pin its own angle and title.'));
+    copy.description.forEach((t, i) => { if ([...t].length > P.descMax) issues.push(issue('desc-long', 'error', `Description ${i + 1} is ${[...t].length} characters; Pinterest takes up to ${P.descMax}.`, `Cut it to ${P.descMax}.`)); });
+  }
+}
+
+// Measured on the pins themselves: text size as the feed shows it (from each pin's HTML of the same name), text under
+// the desktop hover buttons, and pins that look alike at feed size (a small image hash).
+async function pinMeasure(S, page, files, found, issues) {
+  const P = S.pins, pins = found.filter((f) => f.key === 'pin');
+  for (const f of pins) {
+    const stem = basename(f.abs).replace(/\.\w+$/, '');
+    const html = files.find((x) => /\.html?$/i.test(x) && basename(x).replace(/\.\w+$/, '') === stem);
+    if (!html) { issues.push(issue('no-source', 'tip', `${f.file}: no HTML of the same name beside it, so Palm can't measure its text. Judge it on the sheet.`, `Keep ${stem}.html next to it.`)); continue; }
+    await page.setViewport({ width: f.w, height: f.h, deviceScaleFactor: 1 });
+    await page.goto(pathToFileURL(html).href, { waitUntil: 'load', timeout: 30000 });
+    await page.evaluate(() => document.fonts?.ready);
+    const boxes = await page.evaluate(() => {
+      const out = [];
+      for (const e of document.querySelectorAll('body *')) {
+        const s = getComputedStyle(e); if (s.visibility === 'hidden' || s.display === 'none' || +s.opacity <= 0.05) continue;
+        const own = [...e.childNodes].filter((n) => n.nodeType === 3 && n.textContent.trim()); if (!own.length) continue;
+        const rg = document.createRange(); rg.selectNodeContents(e); const r = rg.getBoundingClientRect(); if (r.width < 2 || r.height < 2) continue;
+        out.push({ t: own.map((n) => n.textContent.trim()).join(' ').slice(0, 40), x: r.left, y: r.top, w: r.width, h: r.height, fs: parseFloat(s.fontSize) });
+      }
+      return out;
+    });
+    if (!boxes.length) continue;
+    const k = P.phoneCol / f.w, cut = Math.min(f.h, f.w * P.ratio);
+    const small = boxes.filter((b) => b.fs * k < P.minShown).sort((a, b) => a.fs - b.fs);
+    if (small.length) issues.push(issue('text-small', 'warn', `${f.file}: ${small.length} line${small.length > 1 ? 's' : ''} of text too small to read in the phone feed (a pin is shown about ${P.phoneCol} px wide): ${small.slice(0, 3).map((b) => `"${b.t}" ${Math.round(b.fs)} px → ${(b.fs * k).toFixed(1)} px`).join('; ')}.`, `Make text at least ${Math.ceil(P.minShown / k)} px on this ${f.w}-wide pin, or cut it.`));
+    const big = Math.max(...boxes.map((b) => b.fs));
+    if (big * k < P.headShown) issues.push(issue('headline-small', 'warn', `${f.file}: the biggest text is ${Math.round(big)} px, about ${(big * k).toFixed(1)} px in the phone feed; a pin's headline has to read at a glance while scrolling.`, `Make the headline at least ${Math.ceil(P.headShown / k)} px.`));
+    const hover = boxes.filter((b) => (b.x + b.w > f.w * 0.55 && b.y < f.h * 0.13) || b.y + b.h > Math.min(cut, f.h) * 0.88);
+    if (hover.length) issues.push(issue('under-buttons', 'tip', `${f.file}: text in the top-right corner or along the bottom ("${hover[0].t}"), where Pinterest's Save button and link/share buttons sit on hover (desktop).`, 'Keep key words out of the top-right corner and the bottom strip.'));
+    if (f.h > f.w * P.ratio * 1.02) { const lost = boxes.filter((b) => b.y + b.h > cut); if (lost.length) issues.push(issue('text-cut', 'warn', `${f.file}: "${lost[0].t}" is below the 2:3 line, where a too-tall pin may be cut off in the feed.`, 'Move it up, or make the pin 2:3.')); }
+  }
+  // Pins that look alike at feed size: a 9×8 difference hash (layout) plus a 3×3 colour grid, compared in pairs.
+  if (pins.length > 1) {
+    const hashes = [];
+    for (const f of pins) {
+      const data = `data:image/${f.format === 'png' ? 'png' : 'jpeg'};base64,${readFileSync(f.abs).toString('base64')}`;
+      await page.setContent('<html><body></body></html>');
+      hashes.push(await page.evaluate(async (src) => { const im = new Image(); im.src = src; await im.decode(); const c = document.createElement('canvas'); c.width = 9; c.height = 8; const x = c.getContext('2d'); x.drawImage(im, 0, 0, 9, 8); const d = x.getImageData(0, 0, 9, 8).data; let bits = ''; for (let y = 0; y < 8; y++) for (let i = 0; i < 8; i++) { const a = (y * 9 + i) * 4, b = a + 4; bits += (d[a] + d[a + 1] + d[a + 2]) > (d[b] + d[b + 1] + d[b + 2]) ? '1' : '0'; } c.width = 3; c.height = 3; x.drawImage(im, 0, 0, 3, 3); const g = [...x.getImageData(0, 0, 3, 3).data].filter((_, n) => n % 4 !== 3); return { bits, g }; }, data));
+    }
+    const close = [];
+    for (let i = 0; i < pins.length; i++) for (let j = i + 1; j < pins.length; j++) { let dd = 0; for (let b = 0; b < 64; b++) if (hashes[i].bits[b] !== hashes[j].bits[b]) dd++; const cd = hashes[i].g.reduce((t, v, n) => t + Math.abs(v - hashes[j].g[n]), 0) / hashes[i].g.length; if (dd <= 10 && cd < 24) close.push(`${pins[i].file} and ${pins[j].file}`); }
+    if (close.length) issues.push(issue('look-alike', 'warn', `Pins that look almost the same at feed size: ${close.join('; ')}. Variations work when each gives a different reason to click (another photo, layout or angle), not the same layout recoloured.`, 'Change the photo or the layout, not just the colours.'));
   }
 }
 
@@ -395,6 +503,7 @@ export async function check(store, folder, { out = 'art' } = {}) {
   if (S.photos) shopPhotos(S, imgs, issues, found, used);
   if (S.profiles) profileArt(S, imgs, issues, found, used);
   if (S.ads) adArt(S, imgs, files, issues, found, used);
+  if (S.pins) pinArt(S, imgs, files, issues, found, used);
   for (const a of S.assets || []) {
     let cand = imgs.filter((im) => !used.has(im.file) && (a.logo ? im.format === 'png' && ((im.w === 1280 && im.h <= 720) || (im.h === 720 && im.w <= 1280)) : im.w === a.w && im.h === a.h));
     if (a.hint && cand.length > 1) cand = cand.filter((im) => a.hint.test(im.rel)).concat(cand.filter((im) => !a.hint.test(im.rel)));
@@ -457,6 +566,7 @@ export async function check(store, folder, { out = 'art' } = {}) {
       if (store === 'chrome-web-store' && p.edgeOpaque > 0.35) issues.push(issue('icon-padding', 'warn', `The icon's art reaches the edges (${Math.round(p.edgeOpaque * 100)}% of the outer 16 px is opaque). Chrome's spec is 96×96 art with 16 px of transparent padding each side.`, 'Shrink the art to 96×96 centred on a transparent 128×128.'));
     }
     if (S.ads) await adSafeZone(S, page, files, found, issues);
+    if (S.pins) await pinMeasure(S, page, files, found, issues);
     sheet = resolve(out + '-sheet.png');
     mkdirSync(dirname(sheet), { recursive: true });
     const html = drawSheet(store, found, S);
@@ -544,6 +654,35 @@ function drawSheet(store, found, S) {
     body += `<div class="sec" style="background:#f0f2f5"><h2>Feed at phone width: Facebook (light) and Instagram (dark), with the copy cut where the apps cut it (${lens}; line cuts are Palm's approximation of the apps)</h2><div class="row">${feeds.length ? feeds.map((f) => `<div>${fb(f)}<div class="lab">${esc(f.file)} · ${f.w}×${f.h}</div></div><div>${ig(f)}</div>`).join('') : `<div class="miss" style="width:${W}px;height:${W * 1.25}px">no feed creative (4:5)</div>`}</div></div>`;
     body += `<div class="sec dark" style="background:#1c1c1e"><h2 style="color:#aaa">Stories and Reels at phone size with the app's buttons over the creative; then Meta's safe zone (dashed: keep text and logos inside; about 14% top, 35% bottom, 6% sides)</h2>${verts.length ? verts.map((f) => `<div class="row" style="margin-bottom:18px"><div>${story(f, false)}<div class="lab">Stories · ${esc(f.file)} · ${f.w}×${f.h}</div></div><div>${reel(f)}<div class="lab">Reels</div></div><div>${story(f, true)}<div class="lab">Meta's safe zone</div></div></div>`).join('') : `<div class="miss" style="width:${W}px;height:${Hs}px">no 9:16 creative for Stories and Reels</div>`}</div>`;
     body += `<script>for (const e of document.querySelectorAll('.clamp')) { if (e.scrollHeight > e.clientHeight + 1 && e.dataset.more) { const m = document.createElement('span'); m.textContent = '… ' + e.dataset.more; m.style.cssText = 'position:absolute;right:0;bottom:0;padding:0 0 0 6px;font-weight:600;background:' + e.dataset.bg + ';color:inherit'; e.appendChild(m); } }</script>`;
+  } else if (store === 'pinterest') {
+    const P = S.pins, copy = S?._pins || { title: [], description: [] };
+    const esc = (s) => String(s || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+    const pins = found.filter((x) => x.key === 'pin').map((f, i) => ({ ...f, src: pathToFileURL(f.abs).href, title: copy.title[i] || '' }));
+    const shown = (t) => { const c = [...t]; return c.length > P.titleShown ? esc(c.slice(0, P.titleShown).join('').trimEnd()) + '…' : esc(t); };
+    // Other people's pins around yours: soft blocks at varied heights, so the feed looks like a feed.
+    const others = [1.5, 1.25, 1, 1.78, 1.33, 1.5, 1.2, 1.6, 1.0, 1.4, 1.5, 1.3, 1.75, 1.1, 1.5, 1.25, 1.45, 1.0];
+    const feed = (cols, colW, gap, dark, n) => {
+      const items = []; let oi = 0, pi = 0;
+      for (let k = 0; k < n; k++) { const mine = pins.length && (k === 1 || k === 6 || k === 8 || k === 12 || k === 15) && pi < pins.length; items.push(mine ? { pin: pins[pi++] } : { r: others[oi++ % others.length], hue: (k * 47) % 360 }); }
+      while (pi < pins.length) items.splice(Math.min(items.length, 3 + pi * 4), 0, { pin: pins[pi++] });
+      const col = Array.from({ length: cols }, () => ({ h: 0, html: '' }));
+      for (const it of items) {
+        const c = col.reduce((a, b) => (b.h < a.h ? b : a));
+        const r = it.pin ? it.pin.h / it.pin.w : it.r, hh = Math.round(colW * Math.min(r, P.ratio));
+        const cutLine = it.pin && r > P.ratio * 1.02 ? `<div style="position:absolute;left:0;right:0;bottom:0;border-bottom:3px dashed #e60023"></div><div style="position:absolute;right:4px;bottom:6px;background:#e60023;color:#fff;font-size:10px;padding:1px 4px;border-radius:3px">cut at 2:3</div>` : '';
+        const cap = it.pin ? `<div style="font-weight:600;font-size:${colW > 200 ? 14 : 12}px;line-height:1.25;margin:6px 2px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${it.pin.title ? shown(it.pin.title) : '<i style="opacity:.5">(no title)</i>'}</div>` : `<div style="height:8px;margin:8px 2px 0;width:${40 + (it.hue % 50)}%;background:${dark ? '#333' : '#e9e9e9'};border-radius:4px"></div>`;
+        c.html += `<div style="margin-bottom:${gap}px"><div style="position:relative;width:${colW}px;height:${hh}px;border-radius:${colW > 200 ? 16 : 12}px;overflow:hidden;${it.pin ? '' : `background:hsl(${it.hue},14%,${dark ? 26 : 84}%)`}">${it.pin ? `<img src="${it.pin.src}" style="width:100%;height:100%;object-fit:cover;object-position:top;display:block">${cutLine}` : ''}</div>${cap}</div>`;
+        c.h += hh + gap + 26;
+      }
+      return `<div style="display:flex;gap:${gap}px;align-items:flex-start;background:${dark ? '#111' : '#fff'};color:${dark ? '#eee' : '#111'};padding:${gap}px;border-radius:10px">${col.map((c) => `<div style="width:${colW}px">${c.html}</div>`).join('')}</div>`;
+    };
+    const hover = (f) => { const colW = P.desktopCol, hh = Math.round(colW * Math.min(f.h / f.w, P.ratio)); return `<div><div style="position:relative;width:${colW}px;height:${hh}px;border-radius:16px;overflow:hidden"><img src="${f.src}" style="width:100%;height:100%;object-fit:cover;object-position:top;display:block"><div style="position:absolute;inset:0;background:rgba(0,0,0,.32)"></div><div style="position:absolute;top:10px;left:10px;color:#fff;font-weight:600;font-size:14px">Profile ⌄</div><div style="position:absolute;top:8px;right:8px;background:#e60023;color:#fff;font-weight:700;border-radius:20px;padding:10px 14px">Save</div><div style="position:absolute;left:8px;bottom:8px;background:rgba(255,255,255,.92);border-radius:16px;padding:6px 10px;font-size:12px;font-weight:600;max-width:55%;white-space:nowrap;overflow:hidden">↗ yoursite.com</div><div style="position:absolute;right:8px;bottom:8px;display:flex;gap:6px">${['⤴', '•••'].map((t) => `<div style="width:32px;height:32px;border-radius:50%;background:rgba(255,255,255,.92);display:grid;place-items:center;font-size:12px">${t}</div>`).join('')}</div></div><div class="lab">${esc(f.file)} · hover on desktop</div></div>`; };
+    const phone = (dark) => `<div style="width:390px;border-radius:24px;overflow:hidden;border:1px solid ${dark ? '#333' : '#ddd'}">${feed(2, P.phoneCol, 8, dark, 9)}</div>`;
+    const list = pins.map((f, i) => `<div style="width:300px"><img src="${f.src}" style="width:300px;display:block;border-radius:12px"><div class="lab">${esc(f.file)} · ${f.w}×${f.h} · title ${[...(f.title || '')].length} characters${copy.description[i] ? ` · description ${[...copy.description[i]].length}` : ''}</div><div style="font-size:12px;margin-top:4px;overflow-wrap:anywhere"><b>${esc(f.title) || '<i>(no title)</i>'}</b></div></div>`).join('');
+    body += `<div class="sec"><h2>Home feed on a desktop (about ${P.desktopCol} px columns; Palm's estimate of the layout): titles cut at the ${P.titleShown} characters Pinterest says may show; anything taller than 2:3 drawn cut</h2>${pins.length ? feed(5, P.desktopCol, 16, false, 18) : '<div class="miss" style="width:236px;height:354px">no pins</div>'}</div>`;
+    body += `<div class="sec" style="background:#f3f3f3"><h2>In the app on a phone, two columns about ${P.phoneCol} px wide, light and dark</h2><div class="row">${phone(false)}${phone(true)}</div></div>`;
+    body += `<div class="sec"><h2>On hover (desktop): the Save button and link and share buttons sit over these corners</h2><div class="row">${pins.map(hover).join('')}</div></div>`;
+    body += `<div class="sec"><h2>Each pin larger, with its title</h2><div class="row">${list}</div></div>`;
   } else if (store === 'profiles') {
     const F = (k) => found.find((x) => x.key === k);
     const av = F('avatar'), avu = av ? pathToFileURL(av.abs).href : null;
@@ -716,6 +855,27 @@ async function selfTest() {
   writeFileSync(join(ak, 'copy.md'), 'Primary text: Spring sale: 20% off mugs.\nHeadline: 20% off all mugs\nDescription: Ends Sunday\n');
   const ag = await check('ads', ak, { out: join(d, 'adok') });
   if (ag.issues.length || ag.found.length !== 2) throw new Error('ads clean set: ' + ag.issues.map((i) => i.id + ' ' + i.msg).join(' | ') + ' found ' + ag.found.map((f) => f.key).join(','));
+  // Pinterest: a too-tall pin with tiny text below the 2:3 line, a square image, two look-alike pins, a 120-character
+  // title; then a clean set of three different 2:3 pins.
+  const pn = join(d, 'pins'); mkdirSync(pn);
+  writeFileSync(join(pn, 'tall.html'), '<html><body style="margin:0;width:1000px;height:2400px;background:#c63;position:relative;font:bold 120px sans-serif;color:#fff"><div style="position:absolute;left:60px;top:200px">Soup</div><div style="position:absolute;left:60px;top:2000px;font-size:30px">tiny note at the bottom</div></body></html>');
+  await render(join(pn, 'tall.html'), { out: join(pn, 'tall.png'), size: '1000x2400' });
+  writeFileSync(join(pn, 'a.html'), '<html><body style="margin:0;width:1000px;height:1500px;background:#2a6;display:grid;place-items:center;font:bold 150px sans-serif;color:#fff">Same</body></html>');
+  await render(join(pn, 'a.html'), { out: join(pn, 'a.png'), size: '1000x1500' });
+  writeFileSync(join(pn, 'b.html'), '<html><body style="margin:0;width:1000px;height:1500px;background:#2a6;display:grid;place-items:center;font:bold 150px sans-serif;color:#fff">Same</body></html>');
+  await render(join(pn, 'b.html'), { out: join(pn, 'b.png'), size: '1000x1500' });
+  writeFileSync(join(pn, 'pins.md'), `## Pin 1\nTitle: ${'x'.repeat(120)}\nDescription: hi\n\n## Pin 2\nTitle: Same\n\n## Pin 3\nTitle: Same\n`);
+  const pb = await check('pinterest', pn, { out: join(d, 'pinbad') });
+  for (const want of ['pin-tall', 'text-small', 'text-cut', 'look-alike', 'title-long', 'title-same']) if (!pb.issues.some((i) => i.id === want)) throw new Error('pinterest: expected ' + want + ' in ' + pb.issues.map((i) => i.id).join(','));
+  const pk2 = join(d, 'pins-ok'); mkdirSync(pk2);
+  const looks = [['#183a2e', 'center', 'Soup in 20 minutes'], ['#f3e2c4', 'flex-start', 'Weeknight lentil soup'], ['#7a2e1d', 'flex-end', 'One pot, six bowls']];
+  for (const [i, [bg, at, t]] of looks.entries()) {
+    writeFileSync(join(pk2, `pin${i + 1}.html`), `<html><body style="margin:0;width:1000px;height:1500px;background:${bg};display:flex;flex-direction:column;justify-content:${at};padding:260px 70px;box-sizing:border-box;font:bold 120px sans-serif;color:${i === 1 ? '#222' : '#fff'}"><div>${t}</div><div style="font-size:56px;font-weight:400;margin-top:30px">Recipe on the blog</div>${i === 1 ? '<div style="width:600px;height:500px;background:#c63;margin-top:60px;border-radius:300px"></div>' : ''}</body></html>`);
+    await render(join(pk2, `pin${i + 1}.html`), { out: join(pk2, `pin${i + 1}.png`), size: '1000x1500' });
+  }
+  writeFileSync(join(pk2, 'pins.md'), '## Pin 1\nTitle: Lentil soup in 20 minutes\nDescription: A weeknight soup.\n\n## Pin 2\nTitle: Easy weeknight lentil soup\nDescription: One pot.\n\n## Pin 3\nTitle: One-pot lentil soup for six\nDescription: Feeds six.\n');
+  const pg2 = await check('pinterest', pk2, { out: join(d, 'pinok') });
+  if (pg2.issues.length || pg2.found.length !== 3) throw new Error('pinterest clean set: ' + pg2.issues.map((i) => i.id + ' ' + i.msg).join(' | ') + ' found ' + pg2.found.length);
   console.log(`store-art: all tests pass (play ${r.errors} errors, steam ${s.errors} errors; sheet ${r.sheet})`);
 }
 
@@ -729,5 +889,5 @@ if (typeof process !== 'undefined' && process.argv?.[1] === fileURLToPath(import
   if (argv.includes('--test')) selfTest().then(() => process.exit(0), (e) => { console.error(e); process.exit(1); });
   else if (pos[0] === 'render' && pos[1]) render(pos[1], { out: opt('out', 'out.png'), size: opt('size'), jpeg: argv.includes('--jpeg'), alpha: argv.includes('--alpha'), quality: +opt('quality', 90) }).then(done, fail);
   else if (pos[0] === 'check' && pos[1] && pos[2]) check(pos[1], pos[2], { out: opt('out', 'art') }).then(done, fail);
-  else fail('usage: store-art.mjs check <google-play|chrome-web-store|steam|apple-podcasts|etsy|shopify|profiles|ads> <folder> [--out art]\n       store-art.mjs render <design.html> --size 1024x500 --out upload/feature.png [--jpeg] [--alpha]');
+  else fail('usage: store-art.mjs check <google-play|chrome-web-store|steam|apple-podcasts|etsy|shopify|profiles|ads|pinterest> <folder> [--out art]\n       store-art.mjs render <design.html> --size 1024x500 --out upload/feature.png [--jpeg] [--alpha]');
 }
