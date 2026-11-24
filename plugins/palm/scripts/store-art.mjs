@@ -16,10 +16,13 @@
 // size from each pin's HTML, and pins that look alike at feed size.
 // And a Google Business Profile (gbp): logo, cover, photos and this week's post, drawn in Search on a desktop and a phone, in
 // Maps, in the photo grid and as a post card, with Google's photo rules checked and any text added to photos flagged.
+// (The event check is kept for reference; its job sheet didn't ship: blind 5 of 18, PALM-AGENTS-PLAN.md.)
+// And an App Store In-App Event (event): the 16:9 card in search, Today and the product page, and the 9:16 details page on an
+// iPhone, light and dark, with Apple's metadata rules checked and words in the media flagged where Apple's overlay or crop hits them.
 // One sheet to LOOK at, plus measured problems. Also renders an HTML design to an image at an exact size.
 // adds: tool, fresh-data. Runs on the user's machine with their Chrome/Edge/Chromium; nothing leaves it.
 //
-//   node store-art.mjs check <google-play|chrome-web-store|steam|apple-podcasts|etsy|shopify|profiles|ads|pinterest|gbp> <folder> [--out art]
+//   node store-art.mjs check <google-play|chrome-web-store|steam|apple-podcasts|etsy|shopify|profiles|ads|pinterest|gbp|event> <folder> [--out art]
 //       → JSON {ok, store, found:[{key, file, w, h}], missing, issues} and <out>-sheet.png. Then LOOK at the sheet.
 //   node store-art.mjs render <design.html> --size 1024x500 --out upload/feature.png [--jpeg] [--alpha]
 //       → renders the HTML at exactly that size. PNGs are flattened (no alpha) unless --alpha (icons, Steam logo).
@@ -189,6 +192,26 @@ STORES.gbp = {
   gbp: { formats: ['jpeg', 'png'], minKB: 10, maxMB: 5, min: 250, rec: 720,
     crops: [['Search on a desktop', 4 / 3], ['Maps on a phone', 390 / 210], ['Maps on a desktop', 408 / 240], ['the photo grid', 1]],
     card: { w: 260, ratio: 4 / 3, lines: 3, chars: 115 }, minShown: 8 },
+  words: [], wordsWhy: '',
+};
+
+// App Store In-App Events. Official, developer.apple.com/app-store/in-app-events/ (read 2026-11-24): event card media 16:9,
+// 1920×1080 to 3840×2160; event details media 9:16, 1080×1920 to 2160×3840; .jpg/.jpeg/.png (or video .mov/.m4v/.mp4,
+// 30/60 fps); name up to 30 characters in title case, the event's actual name, not a call to action or tagline, avoiding
+// generic terms or the type of event ("the event badge already displays this information"), no all capitals, no multiple
+// punctuation; short description up to 50 (sentence case, on the card); long description up to 120 (sentence case, on the
+// details page); "Including specific pricing will lead to rejection"; "avoid using text or logos in your media, especially if
+// they include your event name or app name"; "Don't add borders or gradients ... Crops and gradients are automatically
+// applied"; up to 31 days, promoted up to 14 days before; badges Challenge, Competition, Live Event, Major Update, New
+// Season, Premiere, Special Event. Palm's estimates, not Apple's (the sheet says so): the card drawn 343 pt wide with
+// Apple's gradient and text over its lower ~45%, and the details page filling a 390×844 iPhone screen, so the 9:16 media
+// loses about 9% at each side and its lower ~45% sits under the name, description and buttons.
+STORES.event = {
+  name: 'App Store In-App Event',
+  event: { formats: ['jpeg', 'png'], card: { ratio: 16 / 9, min: [1920, 1080], max: [3840, 2160] }, details: { ratio: 9 / 16, min: [1080, 1920], max: [2160, 3840] },
+    name: 30, short: 50, long: 120, maxDays: 31,
+    badges: ['Challenge', 'Competition', 'Live Event', 'Major Update', 'New Season', 'Premiere', 'Special Event'],
+    overlay: 0.45, phone: [390, 844] },
   words: [], wordsWhy: '',
 };
 
@@ -491,6 +514,108 @@ async function gbpMeasure(S, page, files, found, issues) {
   if (read) read.forEach(({ file, text }) => { if (text.length) issues.push(issue('photo-text-read', 'tip', `${others.find((f) => f.abs === file)?.file || basename(file)} shows words ("${text.slice(0, 3).join(' ').slice(0, 40)}"). Signs and labels in a real photo are fine; text added on top isn't (Google's photo criteria).`, 'If you added it, use the plain photo.')); });
 }
 
+// App Store In-App Event: the card (16:9) and details (9:16) media, matched by shape (file names break ties), and the
+// metadata in event.md ("Name:", "Short description:", "Long description:", "Badge:", optional "App:", "Start:", "End:").
+export function readEvent(files) {
+  const f = files.find((x) => /(^|[\/\\])event[^/\\]*\.(md|txt)$/i.test(x)) || files.find((x) => /meta|copy/i.test(basename(x)) && /\.(md|txt)$/i.test(x) && !/readme|brief/i.test(basename(x)));
+  if (!f) return null;
+  const raw = readFileSync(f, 'utf8');
+  const field = (re) => { const m = raw.match(new RegExp(`^\\s*(?:[-*]\\s*)?\\**\\s*(?:${re})\\s*\\**\\s*[:：]\\s*\\**\\s*(.+?)\\s*\\**\\s*$`, 'im')); return m ? m[1].replace(/^["“'`]|["”'`]$/g, '').trim() : ''; };
+  return { file: f, name: field('event name|name|title'), short: field('short description|short'), long: field('long description|long'), badge: field('badge'), app: field('app name|app'), start: field('start(?: date)?'), end: field('end(?: date)?') };
+}
+
+function eventArt(S, imgs, files, issues, found, used) {
+  const E = S.event;
+  const pool = imgs.filter((im) => !/sheet|look|context|preview|mock|icon|screenshot|shot\d|raw|source/i.test(basename(im.file)));
+  const near = (im, r) => Math.abs(im.w / im.h - r) / r < 0.01;
+  const pick = (r, re) => { const c = pool.filter((im) => near(im, r) && !used.has(im.file)); return c.find((im) => re.test(basename(im.file))) || c[0]; };
+  const card = pick(E.card.ratio, /card/i), details = pick(E.details.ratio, /detail/i);
+  for (const [im, key, label, spec] of [[card, 'card', 'Event card', E.card], [details, 'details', 'Event details page', E.details]]) {
+    if (!im) {
+      const wrong = pool.find((x) => !used.has(x.file) && new RegExp(key === 'card' ? 'card' : 'detail', 'i').test(basename(x.file)));
+      issues.push(issue('missing-' + key, 'error', `No ${label.toLowerCase()} image at ${key === 'card' ? '16:9' : '9:16'}${wrong ? ` (${wrong.rel} is ${wrong.w}×${wrong.h}, not ${key === 'card' ? '16:9' : '9:16'})` : ''}. Apple needs both: the card (16:9, ${spec.min.join('×')} to ${spec.max.join('×')}) and the details page (9:16, ${E.details.min.join('×')} to ${E.details.max.join('×')}).`, `Render it with: render ${key}.html --size ${spec.min.join('x')} --out ${key}.png`));
+      continue;
+    }
+    used.add(im.file); found.push({ key, label, file: im.rel, w: im.w, h: im.h, format: im.format, alpha: im.alpha, kb: im.kb, abs: im.file });
+    if (!E.formats.includes(im.format)) issues.push(issue('format', 'error', `${im.rel} is ${im.format.toUpperCase()}; Apple takes .jpg, .jpeg or .png for event images.`, 'Save it as PNG or JPEG.'));
+    if (im.w < spec.min[0] || im.h < spec.min[1]) issues.push(issue('too-small', 'error', `${label} ${im.rel} is ${im.w}×${im.h}; Apple's minimum is ${spec.min.join('×')}.`, `Render it at ${spec.min.join('×')} or larger.`));
+    if (im.w > spec.max[0] || im.h > spec.max[1]) issues.push(issue('too-big', 'error', `${label} ${im.rel} is ${im.w}×${im.h}; Apple's maximum is ${spec.max.join('×')}.`, `Render it at ${spec.max.join('×')} or smaller.`));
+  }
+  // The metadata.
+  const m = readEvent(files); S._event = m;
+  if (!m) { issues.push(issue('missing-metadata', 'error', 'No event metadata (event.md with "Name:", "Short description:", "Long description:" and "Badge:").', 'Write event.md next to the images.')); return; }
+  const len = (t) => [...t].length;
+  const price = /[$£€¥]\s?\d|\d+\s?%\s?off|\b\d+(?:[.,]\d\d)?\s?(?:usd|eur|gbp|jpy)\b|\bhalf[- ]price\b|\bfree trial\b/i;
+  const types = /\b(challenge|competition|contest|live event|event|premiere|new season|season|major update|update)\b/i;
+  const small = new Set(['a', 'an', 'the', 'and', 'but', 'or', 'for', 'nor', 'on', 'at', 'to', 'by', 'of', 'in', 'up', 'as', 'vs', 'with', 'from', 'into']);
+  if (!m.name) issues.push(issue('missing-name', 'error', `${basename(m.file)} has no "Name:".`, 'Add the event name (up to 30 characters).'));
+  else {
+    if (len(m.name) > E.name) issues.push(issue('name-long', 'error', `The name "${m.name}" is ${len(m.name)} characters; Apple allows ${E.name}.`, `Cut it to ${E.name}.`));
+    const letters = m.name.replace(/[^\p{L}]/gu, '');
+    if (letters.length >= 4 && letters === letters.toUpperCase()) issues.push(issue('name-caps', 'warn', `The name "${m.name}" is in capitals; Apple says to avoid all capitals and use title case.`, 'Write it in title case.'));
+    else { const low = m.name.split(/\s+/).filter((w, i) => /^\p{Ll}/u.test(w) && (i === 0 || !small.has(w.toLowerCase()))); if (low.length) issues.push(issue('name-case', 'warn', `The name "${m.name}" isn't in title case (${low.map((w) => `"${w}"`).join(', ')}); Apple asks for title case.`, 'Capitalise each main word.')); }
+    if (/[!?.]{2,}|!.*!/.test(m.name)) issues.push(issue('name-punct', 'warn', `The name "${m.name}" has more than one punctuation mark; Apple says not to use multiple punctuation points.`, 'Keep the name plain.'));
+    if (/^(join|get|download|watch|play|try|start|sign up|don'?t miss|tap|grab|claim|unlock|win|enter|come)\b/i.test(m.name)) issues.push(issue('name-cta', 'warn', `The name "${m.name}" reads as a call to action; Apple wants the event's actual name ("June Leaderboard Climb"), not a call to action or tagline.`, 'Name the event itself.'));
+    const ty = m.name.match(types); if (ty) issues.push(issue('name-type', 'warn', `The name "${m.name}" says "${ty[0]}". Apple: avoid generic terms or describing the type of event, since the badge${m.badge ? ` (${m.badge})` : ''} already shows it above the name.`, 'Name what makes this event itself, and let the badge say what kind it is.'));
+    if (m.app && m.name.toLowerCase().includes(m.app.toLowerCase())) issues.push(issue('name-app', 'tip', `The name repeats the app's name ("${m.app}"); the card already shows your app beside the event.`, 'Spend the 30 characters on the event.'));
+  }
+  if (!m.short) issues.push(issue('missing-short', 'error', `${basename(m.file)} has no "Short description:" (shown on the card).`, 'Add one, up to 50 characters.'));
+  else if (len(m.short) > E.short) issues.push(issue('short-long', 'error', `The short description is ${len(m.short)} characters; Apple allows ${E.short}: "${m.short}".`, `Cut it to ${E.short}.`));
+  if (!m.long) issues.push(issue('missing-long', 'error', `${basename(m.file)} has no "Long description:" (shown on the details page).`, 'Add one, up to 120 characters.'));
+  else if (len(m.long) > E.long) issues.push(issue('long-long', 'error', `The long description is ${len(m.long)} characters; Apple allows ${E.long}.`, `Cut it to ${E.long}.`));
+  for (const [k, t] of [['short', m.short], ['long', m.long]]) {
+    if (!t) continue;
+    const words = t.split(/\s+/).filter((w) => /^\p{L}/u.test(w)); const caps = words.slice(1).filter((w) => /^\p{Lu}\p{Ll}/u.test(w) && !small.has(w.toLowerCase()));
+    if (words.length >= 4 && caps.length / Math.max(1, words.length - 1) > 0.6) issues.push(issue(k + '-case', 'tip', `The ${k} description looks like title case; Apple asks for sentence case.`, 'Capitalise only the first word and names.'));
+  }
+  for (const [where, t] of [['name', m.name], ['short description', m.short], ['long description', m.long]]) if (t && price.test(t)) issues.push(issue('price', 'error', `The ${where} mentions a price or discount ("${t.match(price)[0]}"). Apple: including specific pricing in event metadata leads to rejection.`, 'Take the price out; describe the event.'));
+  if (!m.badge) issues.push(issue('missing-badge', 'warn', 'No "Badge:" chosen. The badge shows above the name on the card and details page.', `Pick one of: ${E.badges.join(', ')}.`));
+  else if (!E.badges.some((b) => b.toLowerCase() === m.badge.toLowerCase())) issues.push(issue('badge', 'error', `"${m.badge}" isn't an App Store event badge.`, `Pick one of: ${E.badges.join(', ')}.`));
+  const d0 = Date.parse(m.start), d1 = Date.parse(m.end);
+  if (!isNaN(d0) && !isNaN(d1) && (d1 - d0) / 86400000 > E.maxDays + 0.01) issues.push(issue('too-long', 'error', `The event runs ${Math.round((d1 - d0) / 86400000)} days; Apple allows up to ${E.maxDays}.`, 'Shorten it, or split it into two events.'));
+}
+
+// Measured from the HTML each image was made from (same name beside it): any text in the media (Apple: avoid it, above all
+// the event or app name), text under the gradient and words Apple lays over the lower part, and on the details page text
+// in the sides an iPhone cuts off. Images without HTML are read with macOS Vision as a tip.
+async function eventMeasure(S, page, files, found, issues) {
+  const E = S.event, m = S._event || {};
+  const [pw, ph] = E.phone, keep = (pw / ph) / E.details.ratio, side = (1 - keep) / 2;
+  for (const f of found.filter((x) => x.key === 'card' || x.key === 'details')) {
+    const stem = basename(f.abs).replace(/\.\w+$/, '');
+    const html = files.find((x) => /\.html?$/i.test(x) && basename(x).replace(/\.\w+$/, '') === stem);
+    if (!html) {
+      const read = readText([f.abs]);
+      const t = read?.[0]?.text || [];
+      if (t.length) issues.push(issue('media-text-read', 'tip', `${f.file} seems to show words ("${t.slice(0, 3).join(' ').slice(0, 40)}"). Apple: avoid text or logos in event media, especially the event or app name; the App Store lays the name and description over it.`, 'Use art without words.'));
+      continue;
+    }
+    await page.setViewport({ width: f.w, height: f.h, deviceScaleFactor: 1 });
+    await page.goto(pathToFileURL(html).href, { waitUntil: 'load', timeout: 30000 });
+    await page.evaluate(() => document.fonts?.ready);
+    const boxes = await page.evaluate(() => {
+      const out = [];
+      for (const e of document.querySelectorAll('body *')) {
+        const s = getComputedStyle(e); if (s.visibility === 'hidden' || s.display === 'none' || +s.opacity <= 0.05) continue;
+        const own = [...e.childNodes].filter((n) => n.nodeType === 3 && n.textContent.trim()); if (!own.length) continue;
+        const rg = document.createRange(); rg.selectNodeContents(e); const r = rg.getBoundingClientRect(); if (r.width < 2 || r.height < 2) continue;
+        out.push({ t: own.map((n) => n.textContent.trim()).join(' ').slice(0, 50), x: r.left, y: r.top, w: r.width, h: r.height });
+      }
+      return out;
+    });
+    if (!boxes.length) continue;
+    const all = boxes.map((b) => b.t).join(' ').toLowerCase();
+    const named = [m.name, m.app].filter(Boolean).find((n) => all.includes(n.toLowerCase()));
+    issues.push(issue('media-text', named ? 'warn' : 'tip', `${f.file} has words in the image ("${boxes[0].t}"${boxes.length > 1 ? ` and ${boxes.length - 1} more` : ''})${named ? `, including "${named}"` : ''}. Apple: avoid text or logos in event media, especially the event or app name; the App Store shows the badge, name and description over it.`, 'Let the art carry the event; put the words in the metadata.'));
+    const under = boxes.filter((b) => b.y + b.h > f.h * (1 - E.overlay));
+    if (under.length) issues.push(issue(f.key + '-overlay', 'warn', `${f.file}: "${under[0].t}" sits in the lower ${Math.round(E.overlay * 100)}% where the App Store lays its gradient, the badge, the event name and the ${f.key === 'card' ? 'short description' : 'long description and buttons'} (Palm's estimate of the layout; see the sheet).`, 'Keep the lower part of the art calm, with nothing that has to be read.'));
+    if (f.key === 'details') {
+      const cut = boxes.filter((b) => b.x < f.w * side - 2 || b.x + b.w > f.w * (1 - side) + 2);
+      if (cut.length) issues.push(issue('details-cut', 'warn', `${f.file}: "${cut[0].t}" is in the outer ${Math.round(side * 100)}% at the side, which a modern iPhone (${pw}×${ph}) cuts off when the 9:16 image fills the screen (Palm's estimate).`, 'Keep anything important in the middle of the details image.'));
+    }
+  }
+}
+
 // macOS Vision text reading for image files, compiled once (null where unavailable): the same approach as video-check's.
 function readText(paths) {
   if (process.platform !== 'darwin' || !paths.length) return null;
@@ -642,6 +767,7 @@ export async function check(store, folder, { out = 'art' } = {}) {
   if (S.ads) adArt(S, imgs, files, issues, found, used);
   if (S.pins) pinArt(S, imgs, files, issues, found, used);
   if (S.gbp) gbpArt(S, imgs, files, issues, found, used);
+  if (S.event) eventArt(S, imgs, files, issues, found, used);
   for (const a of S.assets || []) {
     let cand = imgs.filter((im) => !used.has(im.file) && (a.logo ? im.format === 'png' && ((im.w === 1280 && im.h <= 720) || (im.h === 720 && im.w <= 1280)) : im.w === a.w && im.h === a.h));
     if (a.hint && cand.length > 1) cand = cand.filter((im) => a.hint.test(im.rel)).concat(cand.filter((im) => !a.hint.test(im.rel)));
@@ -706,6 +832,7 @@ export async function check(store, folder, { out = 'art' } = {}) {
     if (S.ads) await adSafeZone(S, page, files, found, issues);
     if (S.pins) await pinMeasure(S, page, files, found, issues);
     if (S.gbp) await gbpMeasure(S, page, files, found, issues);
+    if (S.event) await eventMeasure(S, page, files, found, issues);
     sheet = resolve(out + '-sheet.png');
     mkdirSync(dirname(sheet), { recursive: true });
     const html = drawSheet(store, found, S);
@@ -850,6 +977,34 @@ function drawSheet(store, found, S) {
     body += `<div class="sec"><h2>Photos tab: every profile photo as a square thumbnail (${photos.length + (cv ? 1 : 0)}), and the logo at 40 px on light and dark and at 96 px</h2><div class="row" style="align-items:flex-end">${[cv, ...photos].filter(Boolean).map((f) => `<div>${pic(f, 120, 120)}<div class="lab">${esc(f.file)}</div></div>`).join('') || '<div class="miss" style="width:120px;height:120px">no photos</div>'}<div style="display:flex;gap:14px;align-items:center;background:#fff;padding:12px;border:1px solid #dadce0;border-radius:10px">${logo(40, '#dadce0')}${logo(96, '#dadce0')}</div><div style="display:flex;gap:14px;align-items:center;background:#202124;padding:12px;border-radius:10px">${logo(40, '#3c4043')}${logo(96, '#3c4043')}</div></div></div>`;
     body += `<div class="sec"><h2>The cover (and the post image) larger, with where each view crops it</h2><div class="row">${cropBox(cv)}${pi ? `<div><div class="box" style="width:400px;height:${Math.round(400 * pi.h / pi.w)}px">${pic(pi, 400, Math.round(400 * pi.h / pi.w))}${(() => { const ir = pi.w / pi.h, r = G.card.ratio, W = 400, H = Math.round(400 * pi.h / pi.w); let x0 = 0, y0 = 0, w = W, h = H; if (ir > r) { w = H * r; x0 = (W - w) / 2; } else { h = W / r; y0 = (H - h) / 2; } return `<div class="zone" style="left:${x0}px;top:${y0}px;width:${w}px;height:${h}px"></div>`; })()}</div><div class="lab">${esc(pi.file)} · ${pi.w}×${pi.h} · dashed: the post card's 4:3 crop (Palm's estimate)</div></div>` : ''}</div></div>`;
     body += `<script>for (const e of document.querySelectorAll('.clamp')) { if (e.scrollHeight > e.clientHeight + 1 && e.dataset.more) { const m = document.createElement('span'); m.textContent = '… ' + e.dataset.more; m.style.cssText = 'position:absolute;right:0;bottom:0;padding:0 0 0 6px;font-weight:600;background:' + e.dataset.bg + ';color:inherit'; e.appendChild(m); } }</script>`;
+  } else if (store === 'event') {
+    const E = S.event, m = S._event || {};
+    const esc = (t) => String(t || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+    const F = (k) => found.find((x) => x.key === k), src = (f) => f ? pathToFileURL(f.abs).href : null;
+    const cd = F('card'), dt = F('details');
+    const badge = esc((m.badge || 'Badge').toUpperCase()), name = esc(m.name || '(no name)'), short = esc(m.short || '(no short description)'), long = esc(m.long || '(no long description)'), app = esc(m.app || 'Your app');
+    const th = (dark) => dark ? { bg: '#000', card: '#1c1c1e', fg: '#fff', mute: '#98989d', btn: '#2c2c2e', link: '#0a84ff' } : { bg: '#f2f2f7', card: '#fff', fg: '#000', mute: '#6e6e73', btn: '#eeeef0', link: '#007aff' };
+    const icon = (sz) => `<div style="width:${sz}px;height:${sz}px;border-radius:${Math.round(sz * 0.22)}px;background:linear-gradient(135deg,#8e8e93,#48484a);flex:none"></div>`;
+    const get = (t) => `<div style="background:${t.btn};color:${t.link};font-weight:700;font-size:15px;border-radius:14px;padding:4px 16px">Get</div>`;
+    // The card: the 16:9 media with Apple's gradient and words over its lower part (Palm's estimate of the layout).
+    const card = (t, w = 343, label = 'HAPPENING NOW') => { const h = Math.round(w * 9 / 16);
+      return `<div style="width:${w}px"><div style="font-size:11px;font-weight:600;color:${t.mute};margin:0 0 6px 2px;letter-spacing:.02em">${label}</div><div style="position:relative;width:${w}px;height:${h}px;border-radius:12px;overflow:hidden;background:#333">${cd ? `<img src="${src(cd)}" style="width:100%;height:100%;object-fit:cover;display:block">` : '<div class="miss" style="width:100%;height:100%">no card image</div>'}<div style="position:absolute;inset:auto 0 0 0;height:${Math.round(E.overlay * 100)}%;background:linear-gradient(transparent,rgba(0,0,0,.72))"></div><div style="position:absolute;left:14px;right:14px;bottom:12px;color:#fff"><div style="font-size:11px;font-weight:700;opacity:.85;letter-spacing:.04em">${badge}</div><div style="font-size:19px;font-weight:700;line-height:1.15">${name}</div><div style="font-size:13px;opacity:.9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${short}</div></div></div><div style="display:flex;gap:10px;align-items:center;margin-top:8px">${icon(34)}<div style="flex:1;font-size:13px;color:${t.fg}">${app}<div style="font-size:12px;color:${t.mute}">In-app event</div></div>${get(t)}</div></div>`; };
+    const phone = (t, inner) => `<div style="width:390px;background:${t.bg};color:${t.fg};border-radius:28px;padding:18px 0;overflow:hidden;font:15px/1.35 -apple-system,system-ui,sans-serif;border:1px solid #c7c7cc">${inner}</div>`;
+    const search = (t) => phone(t, `<div style="padding:0 16px"><div style="background:${t.btn};border-radius:10px;padding:8px 12px;color:${t.mute};margin-bottom:14px">Q  habit tracker</div><div style="display:flex;gap:10px;align-items:center;margin-bottom:12px">${icon(56)}<div style="flex:1"><div style="font-weight:600">${app}</div><div style="font-size:12px;color:${t.mute}">Health &amp; Fitness · ★ 4.8</div></div>${get(t)}</div>${card(t)}</div>`);
+    const today = (t) => phone(t, `<div style="padding:0 16px"><div style="font-size:12px;font-weight:600;color:${t.mute}">TUESDAY 1 DECEMBER</div><div style="font-size:30px;font-weight:800;margin-bottom:12px">Today</div>${card(t, 358, 'HAPPENING NOW')}</div>`);
+    const product = (t) => phone(t, `<div style="padding:0 16px"><div style="display:flex;gap:12px;align-items:center;margin-bottom:14px">${icon(88)}<div><div style="font-size:20px;font-weight:700">${app}</div><div style="font-size:13px;color:${t.mute}">Build habits that stick</div><div style="margin-top:8px">${get(t)}</div></div></div><div style="font-size:20px;font-weight:700;margin:6px 0 8px">Events</div>${card(t, 300, 'NOW AVAILABLE')}</div>`);
+    // The details page: the 9:16 media filling a 390×844 screen (cover), the gradient and words over the lower part.
+    const [pw, ph] = E.phone;
+    const details = (t) => `<div style="position:relative;width:${pw}px;height:${ph}px;border-radius:28px;overflow:hidden;background:#222;font:15px/1.35 -apple-system,system-ui,sans-serif;border:1px solid #c7c7cc">${dt ? `<img src="${src(dt)}" style="width:100%;height:100%;object-fit:cover;display:block">` : '<div class="miss" style="width:100%;height:100%">no details image</div>'}<div style="position:absolute;top:54px;right:16px;width:30px;height:30px;border-radius:15px;background:rgba(0,0,0,.45);color:#fff;display:grid;place-items:center;font-size:16px">×</div><div style="position:absolute;inset:auto 0 0 0;height:${Math.round(E.overlay * 100)}%;background:linear-gradient(transparent,${t.bg === '#000' ? 'rgba(0,0,0,.92)' : 'rgba(0,0,0,.78)'})"></div><div style="position:absolute;left:20px;right:20px;bottom:30px;color:#fff"><div style="font-size:12px;font-weight:700;opacity:.85;letter-spacing:.04em">${badge}</div><div style="font-size:28px;font-weight:800;line-height:1.1;margin:2px 0 6px">${name}</div><div style="font-size:15px;opacity:.92">${long}</div><div style="font-size:12px;opacity:.75;margin-top:8px">Starts 1 Dec · ends 31 Dec</div><div style="display:flex;gap:10px;align-items:center;margin-top:14px">${icon(40)}<div style="flex:1;font-size:14px">${app}</div><div style="background:rgba(255,255,255,.22);font-weight:700;border-radius:14px;padding:5px 14px">Notify Me</div><div style="background:#fff;color:#007aff;font-weight:700;border-radius:14px;padding:5px 16px">Get</div></div></div></div>`;
+    const cutBox = () => { if (!dt) return ''; const W = 300, H = Math.round(W * dt.h / dt.w), keep = (pw / ph) / E.details.ratio, x0 = W * (1 - keep) / 2;
+      return `<div><div class="box" style="width:${W}px;height:${H}px"><img src="${src(dt)}" style="width:${W}px;height:${H}px;display:block"><div class="zone" style="left:${x0}px;top:0;width:${W - 2 * x0}px;height:${H}px"></div><div class="zone" style="left:0;top:${H * (1 - E.overlay)}px;width:${W}px;height:${H * E.overlay}px;border-color:#f29900"></div></div><div class="lab">${esc(dt.file)} · ${dt.w}×${dt.h}<br>red: what a ${pw}×${ph} iPhone shows; amber: under the gradient and words (Palm's estimates)</div></div>`; };
+    const cardBox = () => { if (!cd) return ''; const W = 480, H = Math.round(W * cd.h / cd.w);
+      return `<div><div class="box" style="width:${W}px;height:${H}px"><img src="${src(cd)}" style="width:${W}px;height:${H}px;display:block"><div class="zone" style="left:0;top:${H * (1 - E.overlay)}px;width:${W}px;height:${H * E.overlay}px;border-color:#f29900"></div></div><div class="lab">${esc(cd.file)} · ${cd.w}×${cd.h} · amber: under Apple's gradient, badge, name and short description (Palm's estimate)</div></div>`; };
+    const meta = `<div style="font-size:13px;line-height:1.6;max-width:520px"><b>Name</b> (${[...(m.name || '')].length}/${E.name}): ${name}<br><b>Short description</b> (${[...(m.short || '')].length}/${E.short}): ${short}<br><b>Long description</b> (${[...(m.long || '')].length}/${E.long}): ${long}<br><b>Badge</b>: ${esc(m.badge || '—')}</div>`;
+    body += `<div class="sec" style="background:#f2f2f7"><h2>The event card in App Store search, on the Today tab and on the product page (light). Apple lays the gradient, badge, name and short description over the media; the layout drawn is Palm's estimate</h2><div class="row">${search(th(false))}${today(th(false))}${product(th(false))}</div></div>`;
+    body += `<div class="sec dark" style="background:#000"><h2 style="color:#aaa">The same, in dark mode</h2><div class="row">${search(th(true))}${today(th(true))}</div></div>`;
+    body += `<div class="sec" style="background:#e5e5ea"><h2>The event details page on an iPhone (${pw}×${ph}): the 9:16 image fills the screen, so its sides are cut, and the long description and buttons sit over its lower part</h2><div class="row">${details(th(false))}${details(th(true))}${cutBox()}</div></div>`;
+    body += `<div class="sec"><h2>Both images, with what the App Store covers or cuts, and the metadata</h2><div class="row">${cardBox()}${meta}</div></div>`;
   } else if (store === 'profiles') {
     const F = (k) => found.find((x) => x.key === k);
     const av = F('avatar'), avu = av ? pathToFileURL(av.abs).href : null;
@@ -1064,6 +1219,24 @@ async function selfTest() {
   const gg = await check('gbp', gk, { out: join(d, 'gbpok') });
   const gIssues = gg.issues.filter((i) => i.id !== 'photo-text-read');
   if (gIssues.length || gg.found.length !== 6) throw new Error('gbp clean set: ' + gIssues.map((i) => i.id + ' ' + i.msg).join(' | ') + ' found ' + gg.found.map((f) => f.key).join(','));
+  // App Store In-App Event: words in the card under Apple's overlay, words at the side of the details image, and metadata
+  // breaking Apple's rules; then a clean event (plain art, a real name, sentence-case descriptions, a real badge).
+  const ev = join(d, 'event'); mkdirSync(ev);
+  writeFileSync(join(ev, 'card.html'), '<html><body style="margin:0;width:1920px;height:1080px;background:#2a6;position:relative;font:bold 110px sans-serif;color:#fff"><div style="position:absolute;left:80px;bottom:80px">Streak Challenge</div></body></html>');
+  await render(join(ev, 'card.html'), { out: join(ev, 'card.png'), size: '1920x1080' });
+  writeFileSync(join(ev, 'details.html'), '<html><body style="margin:0;width:1080px;height:1920px;background:#263;position:relative;font:bold 90px sans-serif;color:#fff"><div style="position:absolute;left:10px;top:300px">30 days</div></body></html>');
+  await render(join(ev, 'details.html'), { out: join(ev, 'details.png'), size: '1080x1920' });
+  writeFileSync(join(ev, 'event.md'), 'Name: JOIN THE 30-DAY STREAK CHALLENGE!!\nShort description: Get Premium For $4.99 And Keep Your Streak Going\nLong description: Thirty days.\nBadge: Contest\n');
+  const ex = await check('event', ev, { out: join(d, 'eventbad') });
+  for (const want of ['name-long', 'name-caps', 'name-cta', 'name-type', 'name-punct', 'price', 'badge', 'card-overlay', 'details-cut', 'media-text']) if (!ex.issues.some((i) => i.id === want)) throw new Error('event: expected ' + want + ' in ' + ex.issues.map((i) => i.id).join(','));
+  const ek = join(d, 'event-ok'); mkdirSync(ek);
+  writeFileSync(join(ek, 'card.html'), '<html><body style="margin:0;width:1920px;height:1080px;background:radial-gradient(circle at 50% 35%,#7c6,#163)"></body></html>');
+  await render(join(ek, 'card.html'), { out: join(ek, 'card.png'), size: '1920x1080' });
+  writeFileSync(join(ek, 'details.html'), '<html><body style="margin:0;width:1080px;height:1920px;background:radial-gradient(circle at 50% 30%,#7c6,#163)"></body></html>');
+  await render(join(ek, 'details.html'), { out: join(ek, 'details.png'), size: '1080x1920' });
+  writeFileSync(join(ek, 'event.md'), 'Name: December Streak Climb\nShort description: Log one habit every day until New Year.\nLong description: Keep a habit going all December and earn a winter badge for every week you complete.\nBadge: Challenge\nStart: 2026-12-01\nEnd: 2026-12-31\n');
+  const eg = await check('event', ek, { out: join(d, 'eventok') });
+  if (eg.issues.length || eg.found.length !== 2) throw new Error('event clean set: ' + eg.issues.map((i) => i.id + ' ' + i.msg).join(' | ') + ' found ' + eg.found.map((f) => f.key).join(','));
   console.log(`store-art: all tests pass (play ${r.errors} errors, steam ${s.errors} errors; sheet ${r.sheet})`);
 }
 
@@ -1077,5 +1250,5 @@ if (typeof process !== 'undefined' && process.argv?.[1] === fileURLToPath(import
   if (argv.includes('--test')) selfTest().then(() => process.exit(0), (e) => { console.error(e); process.exit(1); });
   else if (pos[0] === 'render' && pos[1]) render(pos[1], { out: opt('out', 'out.png'), size: opt('size'), jpeg: argv.includes('--jpeg'), alpha: argv.includes('--alpha'), quality: +opt('quality', 90) }).then(done, fail);
   else if (pos[0] === 'check' && pos[1] && pos[2]) check(pos[1], pos[2], { out: opt('out', 'art') }).then(done, fail);
-  else fail('usage: store-art.mjs check <google-play|chrome-web-store|steam|apple-podcasts|etsy|shopify|profiles|ads|pinterest|gbp> <folder> [--out art]\n       store-art.mjs render <design.html> --size 1024x500 --out upload/feature.png [--jpeg] [--alpha]');
+  else fail('usage: store-art.mjs check <google-play|chrome-web-store|steam|apple-podcasts|etsy|shopify|profiles|ads|pinterest|gbp|event> <folder> [--out art]\n       store-art.mjs render <design.html> --size 1024x500 --out upload/feature.png [--jpeg] [--alpha]');
 }
