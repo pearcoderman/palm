@@ -14,10 +14,12 @@
 // And Pinterest pins in the desktop home feed (~236 px columns) and the phone app (two columns), light and dark, with the
 // hover buttons, titles cut at the 40 characters Pinterest says may show, too-tall pins cut at 2:3, text measured at feed
 // size from each pin's HTML, and pins that look alike at feed size.
+// And a Google Business Profile (gbp): logo, cover, photos and this week's post, drawn in Search on a desktop and a phone, in
+// Maps, in the photo grid and as a post card, with Google's photo rules checked and any text added to photos flagged.
 // One sheet to LOOK at, plus measured problems. Also renders an HTML design to an image at an exact size.
 // adds: tool, fresh-data. Runs on the user's machine with their Chrome/Edge/Chromium; nothing leaves it.
 //
-//   node store-art.mjs check <google-play|chrome-web-store|steam|apple-podcasts|etsy|shopify|profiles|ads|pinterest> <folder> [--out art]
+//   node store-art.mjs check <google-play|chrome-web-store|steam|apple-podcasts|etsy|shopify|profiles|ads|pinterest|gbp> <folder> [--out art]
 //       → JSON {ok, store, found:[{key, file, w, h}], missing, issues} and <out>-sheet.png. Then LOOK at the sheet.
 //   node store-art.mjs render <design.html> --size 1024x500 --out upload/feature.png [--jpeg] [--alpha]
 //       → renders the HTML at exactly that size. PNGs are flattened (no alpha) unless --alpha (icons, Steam logo).
@@ -166,6 +168,27 @@ STORES.profiles = {
 STORES.pinterest = {
   name: 'Pinterest',
   pins: { ratio: 1.5, rec: [1000, 1500], maxMB: 20, titleMax: 100, titleShown: 40, descMax: 800, desktopCol: 236, phoneCol: 183, minShown: 8, headShown: 14 },
+  words: [], wordsWhy: '',
+};
+
+// Google Business Profile. Official, read 2026-11-24:
+// - "Manage your Business Profile photos & videos" (support.google.com/business/answer/6103862): JPG or PNG; between 10 KB
+//   and 5 MB; recommended 720×720 px; minimum 250×250 px; in focus, well lit, "no significant alterations or excessive use
+//   of filters"; video up to 30 s, 75 MB, 720p or higher; the logo is highlighted once phone/hours are filled in; a cover
+//   photo isn't guaranteed to show first, and a low-quality one may be replaced by a customer's photo.
+// - Maps "Tips for posting media" (support.google.com/contributionpolicy/answer/7411351, linked from the Business Profile
+//   photos policy as the "additional criteria"): avoid screenshots, stock photos, collages, heavily edited images; "Avoid
+//   adding elements such as borders, text, or collaged images".
+// - Posts content policy (support.google.com/business/answer/7213077): posts with unverified contact info (phone numbers,
+//   email addresses, social media handles) may be removed; use a "Call now" button instead. Hotels can't make offer posts.
+// Palm's estimates, not Google's (Google publishes no display sizes; the sheet says so): the crops drawn (Search desktop
+// photo block about 4:3, Maps place-sheet hero about 1.86:1 on a phone and 1.7:1 on a desktop, square grid thumbnails,
+// the logo in a circle), the post card's 4:3 image and its three lines of text before "More" (about 115 characters).
+STORES.gbp = {
+  name: 'Google Business Profile',
+  gbp: { formats: ['jpeg', 'png'], minKB: 10, maxMB: 5, min: 250, rec: 720,
+    crops: [['Search on a desktop', 4 / 3], ['Maps on a phone', 390 / 210], ['Maps on a desktop', 408 / 240], ['the photo grid', 1]],
+    card: { w: 260, ratio: 4 / 3, lines: 3, chars: 115 }, minShown: 8 },
   words: [], wordsWhy: '',
 };
 
@@ -382,6 +405,120 @@ async function pinMeasure(S, page, files, found, issues) {
   }
 }
 
+// Google Business Profile: the logo, the cover, the post image (by file name) and every other image as a profile photo.
+function gbpArt(S, imgs, files, issues, found, used) {
+  const G = S.gbp;
+  const pool = imgs.filter((im) => !/sheet|look|context|preview|mock/i.test(basename(im.file)) && !/(^|\/)(raw|source|originals?|input)\//i.test(im.rel));
+  const pick = (re) => pool.filter((im) => re.test(basename(im.file))).sort((a, b) => a.rel.localeCompare(b.rel));
+  const logo = pick(/logo/i)[0], cover = pick(/cover/i).find((im) => im !== logo), post = pick(/post|update|offer/i).find((im) => im !== logo && im !== cover);
+  const add = (im, key, label) => { used.add(im.file); found.push({ key, label, file: im.rel, w: im.w, h: im.h, format: im.format, alpha: im.alpha, kb: im.kb, abs: im.file }); };
+  if (logo) add(logo, 'logo', 'Logo'); else issues.push(issue('missing-logo', 'warn', 'No logo (a file with "logo" in its name). Google highlights the logo on the profile once its phone number and hours are filled in.', 'Add a square logo, e.g. 720×720.'));
+  if (cover) add(cover, 'cover', 'Cover photo'); else issues.push(issue('missing-cover', 'warn', 'No cover photo (a file with "cover" in its name). It\'s set at the top of the profile, though Google says it isn\'t guaranteed to show first.', 'Choose the photo that best shows the place.'));
+  if (post) add(post, 'post', 'Post image'); else issues.push(issue('missing-post-image', 'tip', 'No post image (a file with "post" in its name). Posts can have a photo; without one the update is text only.', 'Add one for this week\'s post.'));
+  const photos = pool.filter((im) => !used.has(im.file));
+  photos.forEach((im, i) => add(im, 'photo', `Photo ${i + 1}`));
+  if (photos.length < 3) issues.push(issue('photos-few', 'tip', `${photos.length} profile photo${photos.length === 1 ? '' : 's'} besides the logo and cover. Google suggests photos of your storefront, products and services; an exterior photo helps customers recognise the place when they visit.`, 'Add a few real photos: outside, inside, the work.'));
+  else if (!photos.some((im) => /exterior|outside|front|storefront|street/i.test(basename(im.file)))) issues.push(issue('no-exterior', 'tip', 'No photo named as the outside of the place. Google says an exterior photo helps customers recognise your business when they visit.', 'Include one of the shopfront, named e.g. exterior.jpg.'));
+  for (const f of found) {
+    if (!G.formats.includes(f.format)) issues.push(issue('format', 'error', `${f.file} is ${f.format.toUpperCase()}; Google takes JPG or PNG.`, 'Save it as JPG or PNG.'));
+    if (f.kb < G.minKB) issues.push(issue('kb-small', 'error', `${f.file} is ${f.kb} KB; Google wants between ${G.minKB} KB and ${G.maxMB} MB.`, 'Export it at a higher quality.'));
+    if (f.kb > G.maxMB * 1024) issues.push(issue('mb', 'error', `${f.file} is ${(f.kb / 1024).toFixed(1)} MB; Google takes up to ${G.maxMB} MB.`, 'Save it as JPG at quality ~85.'));
+    if (f.w < G.min || f.h < G.min) issues.push(issue('too-small', 'error', `${f.file} is ${f.w}×${f.h}; Google's minimum is ${G.min}×${G.min}.`, `Use at least ${G.rec}×${G.rec}.`));
+    else if (f.w < G.rec || f.h < G.rec) issues.push(issue('small', 'warn', `${f.file} is ${f.w}×${f.h}; Google recommends ${G.rec}×${G.rec}.`, `Make it at least ${G.rec} px on each side.`));
+    if (f.key === 'logo' && Math.abs(f.w / f.h - 1) > 0.02) issues.push(issue('logo-shape', 'warn', `The logo is ${f.w}×${f.h}; it's shown small and round (see the sheet), so a non-square logo gets cropped.`, 'Make it square, with the mark centred and room around it.'));
+    if (f.key === 'logo' && f.alpha) issues.push(issue('logo-alpha', 'tip', 'The logo has transparency; it sits on white in light mode and on dark grey in dark mode, so check both on the sheet.', 'Give it a solid background if either looks wrong.'));
+  }
+  // The post's text (post.md / post.txt): contact details in the text may get the post removed.
+  const pf = files.find((x) => /(^|\/)(post|update|offer)[^/]*\.(md|txt)$/i.test(x));
+  if (!pf) { S._post = null; issues.push(issue('missing-post-text', 'warn', 'No post text (post.md or post.txt).', 'Write this week\'s post in post.md (and a "Button:" line if it has one).')); }
+  else {
+    const raw = readFileSync(pf, 'utf8');
+    const field = (k) => (raw.match(new RegExp(`^\\s*(?:\\*\\*)?${k}(?:\\*\\*)?\\s*:\\s*(.+)$`, 'im')) || [])[1]?.trim() || '';
+    const btn = field('button'), title = field('title');
+    const text = raw.split('\n').filter((l) => !/^\s*#/.test(l) && !/^\s*(\*\*)?(button|title|type|dates?|link|url|image|photo|coupon|terms)(\*\*)?\s*:/i.test(l)).join('\n').replace(/^\s*(\*\*)?(text|description|post)(\*\*)?\s*:\s*/im, '').trim();
+    S._post = { text, btn, title };
+    if (/(\+?\d[\d ()-]{7,}\d)/.test(text) || /[\w.+-]+@[\w-]+\.[\w.]+/.test(text) || /(^|\s)@[A-Za-z0-9_.]{2,}/.test(text)) issues.push(issue('post-contact', 'warn', 'The post text has a phone number, email address or social handle. Google may remove posts with unverified contact information.', 'Take it out and use a "Call now" button, which uses the profile\'s verified number.'));
+    if (!text) issues.push(issue('missing-post-text', 'warn', `${basename(pf)} has no post text.`, 'Write the post.'));
+    else if ([...text].length > G.card.chars) issues.push(issue('post-cut', 'tip', `The post is ${[...text].length} characters; a post card shows only its first lines before "More" (about ${G.card.chars} characters on the card drawn; Palm's estimate): "${[...text].slice(0, G.card.chars).join('').trim()}…". Is the offer and its date in that part?`, 'Lead with the offer and the date.'));
+  }
+}
+
+// Measured from the HTML each image was made from (same name beside it): text added to profile photos (Google's photo
+// criteria say to avoid it), text cut in the crops drawn, and post-image text too small on the card. On a Mac the words in
+// the other photos are also read (signs in real photos count too, so that's only a tip).
+async function gbpMeasure(S, page, files, found, issues) {
+  const G = S.gbp;
+  for (const f of found) {
+    const stem = basename(f.abs).replace(/\.\w+$/, '');
+    const html = files.find((x) => /\.html?$/i.test(x) && basename(x).replace(/\.\w+$/, '') === stem);
+    if (!html) continue;
+    await page.setViewport({ width: f.w, height: f.h, deviceScaleFactor: 1 });
+    await page.goto(pathToFileURL(html).href, { waitUntil: 'load', timeout: 30000 });
+    await page.evaluate(() => document.fonts?.ready);
+    const boxes = await page.evaluate(() => {
+      const out = [];
+      for (const e of document.querySelectorAll('body *')) {
+        const s = getComputedStyle(e); if (s.visibility === 'hidden' || s.display === 'none' || +s.opacity <= 0.05) continue;
+        const own = [...e.childNodes].filter((n) => n.nodeType === 3 && n.textContent.trim()); if (!own.length) continue;
+        const rg = document.createRange(); rg.selectNodeContents(e); const r = rg.getBoundingClientRect(); if (r.width < 2 || r.height < 2) continue;
+        out.push({ t: own.map((n) => n.textContent.trim()).join(' ').slice(0, 40), x: r.left, y: r.top, w: r.width, h: r.height, fs: parseFloat(s.fontSize) });
+      }
+      return out;
+    });
+    f._fromHtml = true;
+    if (!boxes.length) continue;
+    if (f.key === 'cover' || f.key === 'photo') issues.push(issue('photo-text', 'warn', `${f.file} has text added to it ("${boxes[0].t}"). Google's photo criteria say to avoid adding borders, text or collages to photos, and the cover may be swapped for a customer's photo anyway.`, 'Use the plain photo; put the offer in a post instead.'));
+    if (f.key === 'logo') {
+      const rad = Math.min(f.w, f.h) / 2, cx = f.w / 2, cy = f.h / 2;
+      const out = boxes.filter((b) => [[b.x, b.y], [b.x + b.w, b.y], [b.x, b.y + b.h], [b.x + b.w, b.y + b.h]].some(([px, py]) => Math.hypot(px - cx, py - cy) > rad));
+      if (out.length) issues.push(issue('logo-cut', 'warn', `Logo: "${out[0].t}" reaches outside the circle the logo is shown in.`, 'Keep the mark and any words inside the central circle.'));
+      continue;
+    }
+    const crops = f.key === 'post' ? [['the post card', G.card.ratio]] : G.crops;
+    for (const [where, r] of crops) {
+      const ir = f.w / f.h; let x0 = 0, y0 = 0, x1 = f.w, y1 = f.h;
+      if (ir > r) { const cw = f.h * r; x0 = (f.w - cw) / 2; x1 = x0 + cw; } else { const ch = f.w / r; y0 = (f.h - ch) / 2; y1 = y0 + ch; }
+      const cut = boxes.filter((b) => b.x < x0 - 2 || b.x + b.w > x1 + 2 || b.y < y0 - 2 || b.y + b.h > y1 + 2);
+      if (cut.length) issues.push(issue('text-cropped', 'warn', `${f.file}: "${cut[0].t}" is cut off in ${where} (a centred ${r === 1 ? 'square' : r.toFixed(2) + ':1'} crop; Palm's estimate of the layout).`, 'Keep words near the middle, or leave them off the photo.'));
+    }
+    if (f.key === 'post') {
+      const k = G.card.w / f.w, small = boxes.filter((b) => b.fs * k < G.minShown);
+      if (small.length) issues.push(issue('post-text-small', 'warn', `${f.file}: ${small.length} line${small.length > 1 ? 's' : ''} too small to read on the post card (about ${G.card.w} px wide): ${small.slice(0, 3).map((b) => `"${b.t}" ${Math.round(b.fs)} px → ${(b.fs * k).toFixed(1)} px`).join('; ')}.`, `Make text at least ${Math.ceil(G.minShown / k)} px on this ${f.w}-wide image, or cut it.`));
+    }
+  }
+  const others = found.filter((f) => !f._fromHtml && (f.key === 'cover' || f.key === 'photo'));
+  const read = readText(others.map((f) => f.abs));
+  if (read) read.forEach(({ file, text }) => { if (text.length) issues.push(issue('photo-text-read', 'tip', `${others.find((f) => f.abs === file)?.file || basename(file)} shows words ("${text.slice(0, 3).join(' ').slice(0, 40)}"). Signs and labels in a real photo are fine; text added on top isn't (Google's photo criteria).`, 'If you added it, use the plain photo.')); });
+}
+
+// macOS Vision text reading for image files, compiled once (null where unavailable): the same approach as video-check's.
+function readText(paths) {
+  if (process.platform !== 'darwin' || !paths.length) return null;
+  try {
+    const req = createRequire(import.meta.url);
+    const { spawnSync } = req('node:child_process'), { tmpdir } = req('node:os');
+    const dir = join(tmpdir(), 'palm-store-art-ocr-v1'), bin = join(dir, 'ocr');
+    if (!existsSync(bin)) {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'ocr.swift'), [
+        'import Foundation', 'import Vision', 'import AppKit', 'var out: [[String: Any]] = []',
+        'for path in CommandLine.arguments.dropFirst() {',
+        '  guard let img = NSImage(contentsOfFile: path), let cg = img.cgImage(forProposedRect: nil, context: nil, hints: nil) else { out.append(["file": path, "text": [String]()]); continue }',
+        '  let r = VNRecognizeTextRequest()', '  r.recognitionLevel = .accurate',
+        '  try? VNImageRequestHandler(cgImage: cg, options: [:]).perform([r])',
+        '  var items: [String] = []',
+        '  for o in (r.results ?? []) { if let c = o.topCandidates(1).first, c.confidence >= 0.5 { items.append(c.string) } }',
+        '  out.append(["file": path, "text": items])', '}',
+        'FileHandle.standardOutput.write(try! JSONSerialization.data(withJSONObject: out))', ''].join('\n'));
+      const c = spawnSync('swiftc', ['-O', join(dir, 'ocr.swift'), '-o', bin], { encoding: 'utf8' });
+      if (c.status !== 0) return null;
+    }
+    const r = spawnSync(bin, paths, { encoding: 'utf8', maxBuffer: 32 << 20 });
+    if (r.status !== 0) return null;
+    return JSON.parse(r.stdout).map((x) => ({ file: x.file, text: (x.text || []).filter((t) => /[\p{L}\p{N}]{3,}/u.test(t)) }));
+  } catch { return null; }
+}
+
 // Social profiles: one avatar (square) and a banner per site, matched by shape (file names break ties).
 function profileArt(S, imgs, issues, found, used) {
   const pool = imgs.filter((im) => !/sheet|look|context|preview/i.test(basename(im.file)));
@@ -504,6 +641,7 @@ export async function check(store, folder, { out = 'art' } = {}) {
   if (S.profiles) profileArt(S, imgs, issues, found, used);
   if (S.ads) adArt(S, imgs, files, issues, found, used);
   if (S.pins) pinArt(S, imgs, files, issues, found, used);
+  if (S.gbp) gbpArt(S, imgs, files, issues, found, used);
   for (const a of S.assets || []) {
     let cand = imgs.filter((im) => !used.has(im.file) && (a.logo ? im.format === 'png' && ((im.w === 1280 && im.h <= 720) || (im.h === 720 && im.w <= 1280)) : im.w === a.w && im.h === a.h));
     if (a.hint && cand.length > 1) cand = cand.filter((im) => a.hint.test(im.rel)).concat(cand.filter((im) => !a.hint.test(im.rel)));
@@ -567,6 +705,7 @@ export async function check(store, folder, { out = 'art' } = {}) {
     }
     if (S.ads) await adSafeZone(S, page, files, found, issues);
     if (S.pins) await pinMeasure(S, page, files, found, issues);
+    if (S.gbp) await gbpMeasure(S, page, files, found, issues);
     sheet = resolve(out + '-sheet.png');
     mkdirSync(dirname(sheet), { recursive: true });
     const html = drawSheet(store, found, S);
@@ -683,6 +822,34 @@ function drawSheet(store, found, S) {
     body += `<div class="sec" style="background:#f3f3f3"><h2>In the app on a phone, two columns about ${P.phoneCol} px wide, light and dark</h2><div class="row">${phone(false)}${phone(true)}</div></div>`;
     body += `<div class="sec"><h2>On hover (desktop): the Save button and link and share buttons sit over these corners</h2><div class="row">${pins.map(hover).join('')}</div></div>`;
     body += `<div class="sec"><h2>Each pin larger, with its title</h2><div class="row">${list}</div></div>`;
+  } else if (store === 'gbp') {
+    const G = S.gbp, post = S?._post || null;
+    const esc = (s) => String(s || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+    const F = (k) => found.find((x) => x.key === k), src = (f) => f ? pathToFileURL(f.abs).href : null;
+    const cv = F('cover'), lg = F('logo'), pi = F('post'), photos = found.filter((x) => x.key === 'photo');
+    const pic = (f, w, h, extra = '') => f ? `<img src="${src(f)}" style="width:${w}px;height:${h}px;object-fit:cover;display:block;${extra}">` : `<div class="miss" style="width:${w}px;height:${h}px">no ${extra.includes('round') ? 'logo' : 'photo'}</div>`;
+    const logo = (sz, ring) => lg ? `<img src="${src(lg)}" style="width:${sz}px;height:${sz}px;object-fit:cover;border-radius:50%;display:block;flex:none;box-shadow:0 0 0 1px ${ring}">` : `<div class="miss" style="width:${sz}px;height:${sz}px;border-radius:50%;flex:none">logo</div>`;
+    const th = (dark) => dark ? { bg: '#202124', fg: '#e8eaed', mute: '#9aa0a6', line: '#3c4043', chip: '#303134', link: '#8ab4f8' } : { bg: '#fff', fg: '#202124', mute: '#70757a', line: '#dadce0', chip: '#f1f3f4', link: '#1a0dab' };
+    const head = (t, sz = 40) => `<div style="display:flex;gap:12px;align-items:center;margin:12px 0 6px">${logo(sz, t.line)}<div><div style="font-size:20px;color:${t.fg}">Your business</div><div style="font-size:13px;color:${t.mute}">4.8 <span style="color:#fbbc04">★★★★★</span> (126) · Local business</div></div></div>`;
+    const chips = (t) => `<div style="display:flex;gap:8px;margin:8px 0">${['Website', 'Directions', 'Save', 'Call'].map((c) => `<div style="border:1px solid ${t.line};border-radius:16px;padding:5px 12px;font-size:13px;color:${t.link}">${c}</div>`).join('')}</div>`;
+    const card = (t, w = G.card.w) => `<div style="width:${w}px;border:1px solid ${t.line};border-radius:12px;overflow:hidden;background:${t.bg};color:${t.fg};font-size:13px;line-height:1.4">${pi ? pic(pi, w, Math.round(w / G.card.ratio)) : ''}<div style="padding:10px 12px"><div style="font-size:12px;color:${t.mute};margin-bottom:4px">Your business · 2 days ago</div>${post?.title ? `<div style="font-weight:600;margin-bottom:2px">${esc(post.title)}</div>` : ''}<div class="clamp" data-more="More" data-bg="${t.bg}" style="display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:${G.card.lines};overflow:hidden;position:relative;white-space:pre-line">${post?.text ? esc(post.text) : '<i style="opacity:.5">(no post text)</i>'}</div>${post?.btn ? `<div style="margin-top:8px;color:${t.link};font-weight:600">${esc(post.btn)}</div>` : ''}</div></div>`;
+    const deskPanel = (dark) => { const t = th(dark); const ph = (i, w, h) => photos[i] ? pic(photos[i], w, h) : `<div style="width:${w}px;height:${h}px;background:${t.chip}"></div>`;
+      return `<div style="width:370px;background:${t.bg};color:${t.fg};border:1px solid ${t.line};border-radius:12px;padding:0 0 14px;overflow:hidden;font:14px/1.4 Arial,sans-serif"><div style="display:flex;gap:2px;height:178px">${pic(cv, 237, 178)}<div style="display:flex;flex-direction:column;gap:2px">${ph(0, 131, 88)}${ph(1, 131, 88)}</div></div><div style="padding:0 16px">${head(t)}${chips(t)}<div style="font-size:13px;color:${t.mute};margin:10px 0 8px">Updates from the business</div>${card(t)}</div></div>`; };
+    const phoneSearch = (dark) => { const t = th(dark); const strip = [cv, ...photos].filter(Boolean).slice(0, 4);
+      return `<div style="width:390px;background:${t.bg};color:${t.fg};border:1px solid ${t.line};border-radius:24px;padding:14px 0;overflow:hidden;font:14px/1.4 Arial,sans-serif"><div style="padding:0 16px">${head(t, 36)}${chips(t)}</div><div style="display:flex;gap:4px;padding:6px 16px;overflow:hidden">${strip.length ? strip.map((f, i) => pic(f, i === 0 ? 213 : 160, 160, `border-radius:${i === 0 ? '12px 0 0 12px' : '0'}`)).join('') : '<div class="miss" style="width:213px;height:160px">no photos</div>'}</div><div style="padding:10px 16px 0">${card(t, 300)}</div></div>`; };
+    const mapsPhone = (dark) => { const t = th(dark);
+      return `<div style="width:390px;background:${t.bg};color:${t.fg};border-radius:24px;overflow:hidden;border:1px solid ${t.line};font:14px/1.4 Arial,sans-serif">${pic(cv, 390, 210)}<div style="padding:4px 16px 16px">${head(t, 40)}<div style="display:flex;gap:8px;margin-top:8px">${['Directions', 'Start', 'Call', 'Save', 'Share'].map((c, i) => `<div style="border-radius:18px;padding:7px 12px;font-size:13px;${i === 0 ? 'background:#1a73e8;color:#fff' : `background:${t.chip};color:${t.link}`}">${c}</div>`).join('')}</div></div></div>`; };
+    const mapsDesk = (dark) => { const t = th(dark);
+      return `<div style="width:408px;background:${t.bg};color:${t.fg};border:1px solid ${t.line};overflow:hidden;font:14px/1.4 Arial,sans-serif">${pic(cv, 408, 240)}<div style="padding:6px 20px 16px">${head(t, 40)}</div></div>`; };
+    const cropBox = (f) => { if (!f) return ''; const W = 520, H = Math.round(W * f.h / f.w); const ir = f.w / f.h;
+      const boxes = G.crops.map(([where, r], i) => { let x0 = 0, y0 = 0, w = W, h = H; if (ir > r) { w = H * r; x0 = (W - w) / 2; } else { h = W / r; y0 = (H - h) / 2; } return `<div class="zone" style="left:${x0}px;top:${y0}px;width:${w}px;height:${h}px;border-color:${['#ff2d55', '#1a73e8', '#f29900', '#188038'][i]}"></div>`; }).join('');
+      return `<div><div class="box" style="width:${W}px;height:${H}px">${pic(f, W, H)}${boxes}</div><div class="lab">${esc(f.file)} · ${f.w}×${f.h} · crops: <span style="color:#ff2d55">Search desktop 4:3</span>, <span style="color:#1a73e8">Maps phone</span>, <span style="color:#f29900">Maps desktop</span>, <span style="color:#188038">grid square</span> (Palm's estimates)</div></div>`; };
+    body += `<div class="sec"><h2>Google Search on a desktop: the profile panel, light and dark (the photo block, logo and post card are Palm's estimate of Google's layout; Google publishes no display sizes)</h2><div class="row">${deskPanel(false)}${deskPanel(true)}</div></div>`;
+    body += `<div class="sec" style="background:#f1f3f4"><h2>Google Search on a phone, light and dark: the photo strip and this week's post</h2><div class="row">${phoneSearch(false)}${phoneSearch(true)}</div></div>`;
+    body += `<div class="sec"><h2>Google Maps: the place sheet on a phone (light and dark) and the side panel on a desktop, with the cover across the top</h2><div class="row">${mapsPhone(false)}${mapsPhone(true)}${mapsDesk(false)}</div></div>`;
+    body += `<div class="sec"><h2>Photos tab: every profile photo as a square thumbnail (${photos.length + (cv ? 1 : 0)}), and the logo at 40 px on light and dark and at 96 px</h2><div class="row" style="align-items:flex-end">${[cv, ...photos].filter(Boolean).map((f) => `<div>${pic(f, 120, 120)}<div class="lab">${esc(f.file)}</div></div>`).join('') || '<div class="miss" style="width:120px;height:120px">no photos</div>'}<div style="display:flex;gap:14px;align-items:center;background:#fff;padding:12px;border:1px solid #dadce0;border-radius:10px">${logo(40, '#dadce0')}${logo(96, '#dadce0')}</div><div style="display:flex;gap:14px;align-items:center;background:#202124;padding:12px;border-radius:10px">${logo(40, '#3c4043')}${logo(96, '#3c4043')}</div></div></div>`;
+    body += `<div class="sec"><h2>The cover (and the post image) larger, with where each view crops it</h2><div class="row">${cropBox(cv)}${pi ? `<div><div class="box" style="width:400px;height:${Math.round(400 * pi.h / pi.w)}px">${pic(pi, 400, Math.round(400 * pi.h / pi.w))}${(() => { const ir = pi.w / pi.h, r = G.card.ratio, W = 400, H = Math.round(400 * pi.h / pi.w); let x0 = 0, y0 = 0, w = W, h = H; if (ir > r) { w = H * r; x0 = (W - w) / 2; } else { h = W / r; y0 = (H - h) / 2; } return `<div class="zone" style="left:${x0}px;top:${y0}px;width:${w}px;height:${h}px"></div>`; })()}</div><div class="lab">${esc(pi.file)} · ${pi.w}×${pi.h} · dashed: the post card's 4:3 crop (Palm's estimate)</div></div>` : ''}</div></div>`;
+    body += `<script>for (const e of document.querySelectorAll('.clamp')) { if (e.scrollHeight > e.clientHeight + 1 && e.dataset.more) { const m = document.createElement('span'); m.textContent = '… ' + e.dataset.more; m.style.cssText = 'position:absolute;right:0;bottom:0;padding:0 0 0 6px;font-weight:600;background:' + e.dataset.bg + ';color:inherit'; e.appendChild(m); } }</script>`;
   } else if (store === 'profiles') {
     const F = (k) => found.find((x) => x.key === k);
     const av = F('avatar'), avu = av ? pathToFileURL(av.abs).href : null;
@@ -876,6 +1043,27 @@ async function selfTest() {
   writeFileSync(join(pk2, 'pins.md'), '## Pin 1\nTitle: Lentil soup in 20 minutes\nDescription: A weeknight soup.\n\n## Pin 2\nTitle: Easy weeknight lentil soup\nDescription: One pot.\n\n## Pin 3\nTitle: One-pot lentil soup for six\nDescription: Feeds six.\n');
   const pg2 = await check('pinterest', pk2, { out: join(d, 'pinok') });
   if (pg2.issues.length || pg2.found.length !== 3) throw new Error('pinterest clean set: ' + pg2.issues.map((i) => i.id + ' ' + i.msg).join(' | ') + ' found ' + pg2.found.length);
+  // Google Business Profile: text on the cover, a photo under 250 px, a WebP, a non-square logo, contact details in the
+  // post; then a clean profile (square logo, plain photos at 720+, a post image without small text, a clean post).
+  const gb = join(d, 'gbp'); mkdirSync(gb);
+  writeFileSync(join(gb, 'cover.html'), '<html><body style="margin:0;width:1600px;height:900px;background:#357;position:relative;font:bold 90px sans-serif;color:#fff"><div style="position:absolute;left:30px;top:30px">20% off tune-ups</div></body></html>');
+  await render(join(gb, 'cover.html'), { out: join(gb, 'cover.jpg'), size: '1600x900', jpeg: true });
+  await render(join(d, 'feature.html'), { out: join(gb, 'logo.png'), size: '900x500' });
+  await render(join(d, 'feature.html'), { out: join(gb, 'tiny.jpg'), size: '200x200', jpeg: true });
+  writeFileSync(join(gb, 'post.md'), 'Title: Winter service\nBook a winter service this week and get 20% off. Call us on 0117 496 0123 or email hello@spoke.example.\nButton: Book\n');
+  const gx = await check('gbp', gb, { out: join(d, 'gbpbad') });
+  for (const want of ['photo-text', 'text-cropped', 'too-small', 'logo-shape', 'post-contact', 'missing-post-image']) if (!gx.issues.some((i) => i.id === want)) throw new Error('gbp: expected ' + want + ' in ' + gx.issues.map((i) => i.id).join(','));
+  const gk = join(d, 'gbp-ok'); mkdirSync(gk);
+  writeFileSync(join(gk, 'plain.html'), '<html><body style="margin:0;width:1200px;height:900px;background:linear-gradient(#467,#bcd)"></body></html>');
+  for (const n of ['cover', 'exterior', 'workshop', 'wheels']) await render(join(gk, 'plain.html'), { out: join(gk, n + '.jpg'), size: '1200x900', jpeg: true, quality: 95 });
+  writeFileSync(join(gk, 'logo.html'), '<html><body style="margin:0;width:720px;height:720px;background:radial-gradient(#4a7fa0,#183048);display:grid;place-items:center;font:bold 200px sans-serif;color:#fff">S</body></html>');
+  await render(join(gk, 'logo.html'), { out: join(gk, 'logo.png'), size: '720x720' });
+  writeFileSync(join(gk, 'post.html'), '<html><body style="margin:0;width:1200px;height:900px;background:#357;display:grid;place-items:center;font:bold 110px sans-serif;color:#fff">Winter service</body></html>');
+  await render(join(gk, 'post.html'), { out: join(gk, 'post.jpg'), size: '1200x900', jpeg: true, quality: 95 });
+  writeFileSync(join(gk, 'post.md'), 'Winter service: 20% off this week.\nButton: Book\n');
+  const gg = await check('gbp', gk, { out: join(d, 'gbpok') });
+  const gIssues = gg.issues.filter((i) => i.id !== 'photo-text-read');
+  if (gIssues.length || gg.found.length !== 6) throw new Error('gbp clean set: ' + gIssues.map((i) => i.id + ' ' + i.msg).join(' | ') + ' found ' + gg.found.map((f) => f.key).join(','));
   console.log(`store-art: all tests pass (play ${r.errors} errors, steam ${s.errors} errors; sheet ${r.sheet})`);
 }
 
@@ -889,5 +1077,5 @@ if (typeof process !== 'undefined' && process.argv?.[1] === fileURLToPath(import
   if (argv.includes('--test')) selfTest().then(() => process.exit(0), (e) => { console.error(e); process.exit(1); });
   else if (pos[0] === 'render' && pos[1]) render(pos[1], { out: opt('out', 'out.png'), size: opt('size'), jpeg: argv.includes('--jpeg'), alpha: argv.includes('--alpha'), quality: +opt('quality', 90) }).then(done, fail);
   else if (pos[0] === 'check' && pos[1] && pos[2]) check(pos[1], pos[2], { out: opt('out', 'art') }).then(done, fail);
-  else fail('usage: store-art.mjs check <google-play|chrome-web-store|steam|apple-podcasts|etsy|shopify|profiles|ads|pinterest> <folder> [--out art]\n       store-art.mjs render <design.html> --size 1024x500 --out upload/feature.png [--jpeg] [--alpha]');
+  else fail('usage: store-art.mjs check <google-play|chrome-web-store|steam|apple-podcasts|etsy|shopify|profiles|ads|pinterest|gbp> <folder> [--out art]\n       store-art.mjs render <design.html> --size 1024x500 --out upload/feature.png [--jpeg] [--alpha]');
 }
