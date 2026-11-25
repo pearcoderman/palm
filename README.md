@@ -98,3 +98,7 @@ bearer_token_env_var = "PALM_KEY"
 ## Guides
 
 Free, dated and sourced guides with real before/after results: https://www.yuzool.com/palm/learn/ (App Store screenshot sizes, Instagram post size, link previews, HTML email dark mode, Core Web Vitals, accessibility and more).
+
+## Licence
+
+This plugin, its free tools and the `palm` command-line tool are open source under the MIT licence (see LICENSE). Palm Pro's job sheets, Pro tools and Palm's server are not; see https://www.yuzool.com/palm/terms.html.
