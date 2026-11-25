@@ -81,7 +81,7 @@ export function guessTrim(w, h) {
 }
 
 // ---------- a small PDF reader (enough for page boxes, fonts, images, text and line sizes) ----------
-class Lexer {
+export class Lexer {
   constructor(s, i = 0) { this.s = s; this.i = i; }
   ws() { const s = this.s; for (;;) { while (this.i < s.length && /[\x00\t\n\f\r ]/.test(s[this.i])) this.i++; if (s[this.i] === '%') { while (this.i < s.length && s[this.i] !== '\n' && s[this.i] !== '\r') this.i++; } else return; } }
   value() {
