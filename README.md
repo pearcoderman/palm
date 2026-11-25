@@ -104,3 +104,7 @@ Free, dated and sourced guides with real before/after results: https://www.yuzoo
 ## Licence
 
 This plugin, its free tools and the `palm` command-line tool are open source under the MIT licence (see LICENSE). Palm Pro's job sheets, Pro tools and Palm's server are not; see https://www.yuzool.com/palm/terms.html.
+
+## The palm CLI and desks
+
+For terminals and other agents, and for Palm's desks (every platform size, invoices and proposals, outreach, App Store, search, the Monday brief): `npx -y github:pearcoderman/palm-cli doctor`. Source: https://github.com/pearcoderman/palm-cli (MIT).
