@@ -18,6 +18,7 @@ Every part runs the same test: the same agent and request, with and without Palm
 | Weekly content kit: one post → newsletter, share image, social posts and story | 18 of 18 (measured 3 of 3 vs 0 of 3) | Pro |
 | Website icons (favicon, Apple touch icon, maskable) | 18 of 18 | Pro |
 | Web forms on a phone (filled in, sent empty and with a wrong email, tabbed) | 18 of 18 (checks tied; judges chose errors shown next to each field) | Pro |
+| Event page with Add to calendar (each calendar entry in four time zones) | 15 of 18 (calendar checks tied; judges chose the page that fits a phone) | Pro |
 | Dark mode for an existing website (light and dark, phone and desktop, toggle reloaded) | 18 of 18 | Pro |
 | App Store screenshots + preview video | 17 of 18 | Pro |
 | Mac App Store screenshots | 14 of 18 | Pro |
@@ -25,6 +26,7 @@ Every part runs the same test: the same agent and request, with and without Palm
 | Idea to launch: app, page, link, email, posts, Product Hunt, launch week | 16 of 18 (measured 3 of 3 vs 0 of 3) | Pro |
 | Launch landing page for an app or product | 16 of 18 | Pro |
 | Newsletter / marketing email | 16 of 18 (measured 100 vs 64–70) | Pro |
+| Welcome email sequence (every email in six inboxes, plus the inbox list) | 17 of 18 (measured 3 of 3 vs 0 of 3) | Pro |
 | Steam store and library art | 16 of 18 (measured 3 of 3 vs 2 of 3) | Pro |
 | Google Play icon, feature graphic, screenshots | 15 of 18 | Pro |
 | Podcast cover and episode art (Apple Podcasts) | 17 of 18 | Pro |
@@ -60,6 +62,7 @@ Every part runs the same test: the same agent and request, with and without Palm
 - `deck-check`: a slide deck (HTML or PDF) checked slide by slide at 1920×1080: text off the slide, cut off in its box or overlapping, the smallest text, words per slide, contrast against the real pixels and on a washed-out projector, a deck cut off on a 1440×900 laptop, and the PDF that gets sent (one 16:9 page per slide, backgrounds kept); drawn as presenter thumbnails, on a projector, in a video call and as an email attachment. `pdf` makes a clean 16:9 PDF. Keep print-check.mjs beside it. Its `linkedin` mode shows a LinkedIn PDF carousel in the phone and desktop feed (light and dark, the post cut at "…see more", the title over page 1, every page at the real phone size) and measures text size and words per page against LinkedIn's limits.
 - `chart-check`: a chart or data graphic (SVG, HTML or PNG) seen at the size it's shown (a phone feed, a report on a laptop, a video call), as red-blind, green-blind and blue-blind readers and a greyscale print see it, and on a dark page: labels too small, overlapping or cut off, series colours people can't tell apart (CIEDE2000), a bar axis that doesn't start at zero, too many colours, WCAG contrast.
 - `form-check`: every form on a site tried on a 390 px phone the way people use it: filled in, sent empty and with a wrong email, tabbed through and pasted into. Checks labels tied to fields (WCAG 1.3.1), autofill tokens for fields about the person (1.3.5, from the HTML spec's list), the phone keyboard (type/inputmode), text under 16 px that makes iPhone zoom, 24×24 tap targets (2.5.8), and errors shown next to the field and announced (3.3.1, 4.1.3); draws a sheet.
+- `event-check`: an event page as attendees, their calendars and Google see it: schema.org Event data checked against Google's rules, every .ics file (RFC 5545) and Google Calendar link converted to the times people in other zones will see and checked against the page, the page on a phone and its link card.
 - `theme-check`: a site's dark mode seen page by page in light and dark on a phone and a desktop: text and field contrast against the real pixels (WCAG 1.4.3, 1.4.11), focus rings by tabbing, transparent logos that vanish, images, embeds and code blocks that glare, color-scheme, theme-color, and a header toggle clicked, reloaded and its first frame; draws the sheet.
 - `i18n-check`: a translated site (the original pages at the top, each language in a folder: `de/`, `ja/` …) seen page by page beside the original on a phone and a desktop: text clipped, cut off with "…" or spilling out of its box, the page wider than the screen, buttons wrapping to three lines, `<html lang>` missing or wrong, Japanese set in a Chinese font (from the fonts Chrome actually used), missing hreflang, text and labels left untranslated, English-format dates and numbers; draws the sheet.
 - `print-check`: print-ready PDFs for business cards, flyers and posters (exact trim + bleed with the trim box set) and any PDF checked: bleed that really runs to the edge, text near the cut, photo ppi at print size, smallest text and line, embedded fonts; drawn as cut with the blade 1 mm off and at real size. Pages are drawn with Ghostscript, pdftoppm, mutool or PyMuPDF, whichever is installed.
@@ -67,7 +70,7 @@ Every part runs the same test: the same agent and request, with and without Palm
 
 **Palm Pro ($15/month or $150/year, 7-day free trial), fetched with your key:**
 - `store-shots` + `store-media`: App Store screenshots at exact size, seen in a real-size search result; checks and builds app preview videos (886×1920, 15–30 s, audio track).
-- `email-render`: your email in forced dark mode, full invert, Apple Mail dark, images blocked and `<style>` stripped; Gmail clipping, unsubscribe.
+- `email-render`: your email in forced dark mode, full invert, Apple Mail dark, images blocked and `<style>` stripped; Gmail clipping, unsubscribe; `sequence` draws a welcome series in every inbox view plus the phone inbox list.
 - `share-preview`: every page's link card in seven apps, from the raw HTML; renders 1200×630 share images; draws social posts where people see them (Instagram feed and 3:4 grid, a story under the app's bars, LinkedIn, X), captions cut where each app cuts them.
 - `site-speed`: Core Web Vitals measured on a throttled phone, with right-sized WebP copies.
 - `review-scan`: App Review pre-submission scan of your project against the October 2026 guidelines.
