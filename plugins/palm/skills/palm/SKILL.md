@@ -78,4 +78,10 @@ For proposals and invoices (a proposal the client reads and accepts from a link,
 
 For outreach (short personal email sequences to a list), use the `palm` CLI's outreach desk: `npx -y github:pearcoderman/palm-cli outreach --help`. Ask the user why they may email these people (consent, customer or legitimate interest) and never guess it; keep emails short and personal; show the user every draft (Palm never sends); record replies at once with `palm outreach replied <email>`. Pro.
 
+For PDFs (merge, split, rotate, compress, passwords; redaction that searches the saved file and saves nothing unless it's really gone; sending a PDF to be signed and checking the signed copy), use `npx -y github:pearcoderman/palm-cli pdf --help`. Open look.png after a redaction. Redaction and signing are Pro.
+
+For a passport, visa or ID photo, use `npx -y github:pearcoderman/palm-cli passport --help` (43 documents' official rules, dated). Show the user the checks as advice: the office that takes the photo decides.
+
+For a page that's live without hosting (link in bio, a one-page site, a digital business card, a menu) and QR codes that must scan, use `npx -y github:pearcoderman/palm-cli pages --help`. Tell the user the page is public to anyone with its link.
+
 When the user asks what needs doing this week across their business (money owed, proposals, outreach, App Store, search, their watched pages), run `npx -y github:pearcoderman/palm-cli brief` and go through its "Do today" list with them. Pro.
